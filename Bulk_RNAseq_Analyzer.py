@@ -513,7 +513,7 @@ with st.sidebar:
 # — Sidebar: Language & Theme
 with st.sidebar.expander("Language & Theme", expanded=True):
     _lang_opts = list(LANGUAGE_OPTIONS.keys())
-    sel_lang_display = st.selectbox("", _lang_opts,
+    sel_lang_display = st.selectbox("Language", _lang_opts, label_visibility="collapsed",
         index=_lang_opts.index(st.session_state.get("lang_display", "日本語")))
     st.session_state["lang_display"] = sel_lang_display
     lang = LANGUAGE_OPTIONS[sel_lang_display]
