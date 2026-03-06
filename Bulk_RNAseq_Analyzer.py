@@ -294,9 +294,9 @@ def run_deg(counts_df, metadata, ref_condition, test_condition, n_cpus=1):
     # Filter to only the two groups being compared
     metadata = metadata[metadata["condition"].isin([ref_condition, test_condition])]
     count_matrix = counts_df.T.loc[metadata.index]
-    dds = DeseqDataSet(counts=count_matrix, metadata=metadata, design="~condition", refit_cooks=(metadata["condition"].value_counts().min() >= 3), n_cpus=n_cpus)
+    dds = DeseqDataSet(counts=count_matrix, metadata=metadata, design="~condition", refit_cooks=(metadata["condition"].value_counts().min() >= 3), n_cpus=1)
     dds.deseq2()
-    stat_res = DeseqStats(dds, contrast=["condition", test_condition, ref_condition], n_cpus=n_cpus)
+    stat_res = DeseqStats(dds, contrast=["condition", test_condition, ref_condition], n_cpus=1)
     stat_res.summary()
     res = stat_res.results_df.copy()
     res["padj"] = res["padj"].fillna(1.0)
