@@ -294,7 +294,7 @@ def run_deg(counts_df, metadata, ref_condition, test_condition, n_cpus=1):
     # Filter to only the two groups being compared
     metadata = metadata[metadata["condition"].isin([ref_condition, test_condition])]
     count_matrix = counts_df.T.loc[metadata.index]
-    dds = DeseqDataSet(counts=count_matrix, metadata=metadata, design="~condition", refit_cooks=(metadata["condition"].value_counts().min() >= 3), ref_level=["condition", ref_condition], n_cpus=n_cpus)
+    dds = DeseqDataSet(counts=count_matrix, metadata=metadata, design="~condition", refit_cooks=(metadata["condition"].value_counts().min() >= 3), n_cpus=n_cpus)
     dds.deseq2()
     stat_res = DeseqStats(dds, contrast=["condition", test_condition, ref_condition], n_cpus=n_cpus)
     stat_res.summary()
@@ -827,7 +827,7 @@ with tab_upload:
 </div>
 """, unsafe_allow_html=True)
         if st.button("✅ このモードで開始" if _is_jp else "✅ Start with this mode",
-                     key="mode_single", use_container_width=True,
+                     key="mode_single", width="stretch",
                      type="primary" if _single_active else "secondary"):
             st.session_state["upload_mode"] = "single"
             st.rerun()
@@ -849,7 +849,7 @@ with tab_upload:
 </div>
 """, unsafe_allow_html=True)
         if st.button("✅ このモードで開始" if _is_jp else "✅ Start with this mode",
-                     key="mode_multi", use_container_width=True,
+                     key="mode_multi", width="stretch",
                      type="primary" if _multi_active else "secondary"):
             st.session_state["upload_mode"] = "multi"
             st.rerun()
@@ -953,7 +953,7 @@ with tab_upload:
         ul, ur = st.columns([1, 1], gap="large")
         with ul:
             btn_text = "🧪 サンプルデータで試す" if _is_jp else "🧪 Try with Sample Data"
-            if st.button(btn_text, use_container_width=True):
+            if st.button(btn_text, width="stretch"):
                 with st.status("Generating Sample Data...") as status:
                     cdf, meta = generate_sample_data()
                     st.session_state["counts_df"] = cdf
@@ -1007,7 +1007,7 @@ with tab_upload:
                     c1.metric(t("genes", lang), f"{df.shape[0]:,}")
                     c2.metric(t("samples", lang), f"{df.shape[1]:,}")
                     c3.metric(t("qc_zeros", lang), f"{(df == 0).sum().sum() / df.size:.1%}")
-                st.dataframe(df.head(10), use_container_width=True)
+                st.dataframe(df.head(10), width="stretch")
                 ng = st.number_input(t("n_groups", lang), 2, 6, 2)
                 gnames = [st.text_input(f"Group {i+1}", f"G{i+1}", key=f"gn_{i}") for i in range(ng)]
                 sample_map = {s: st.selectbox(f"Assign {s}", gnames, key=f"gs_{s}") for s in df.columns}
@@ -1053,13 +1053,13 @@ with tab_upload:
                     if log_scale:
                         fig_lib.update_layout(yaxis_type="log")
                     fig_lib.update_layout(font=dict(family=sel_font, size=fig_font_sz))
-                    st.plotly_chart(fig_lib, use_container_width=True)
+                    st.plotly_chart(fig_lib, width="stretch")
                     det_genes = (qc_df > 0).sum(axis=0).reset_index()
                     det_genes.columns = ["Sample", "Detected Genes"]
                     fig_det = px.bar(det_genes, x="Sample", y="Detected Genes", title="Detected Genes per Sample",
                                      template=plotly_template, color="Sample")
                     fig_det.update_layout(font=dict(family=sel_font, size=fig_font_sz))
-                    st.plotly_chart(fig_det, use_container_width=True)
+                    st.plotly_chart(fig_det, width="stretch")
 
                 with qct2:
                     corr_mat = qc_df.corr()
@@ -1067,7 +1067,7 @@ with tab_upload:
                                          color_continuous_scale="Viridis", title="Sample Correlation Heatmap",
                                          template=plotly_template)
                     fig_corr.update_layout(font=dict(family=sel_font, size=fig_font_sz))
-                    st.plotly_chart(fig_corr, use_container_width=True)
+                    st.plotly_chart(fig_corr, width="stretch")
                     log_qc = np.log1p(qc_df)
                     from sklearn.decomposition import PCA
                     pca_qc = PCA(n_components=2)
@@ -1084,7 +1084,7 @@ with tab_upload:
                         yaxis_title=f"PC2 ({exp_var[1]:.1f}%)",
                         font=dict(family=sel_font, size=fig_font_sz)
                     )
-                    st.plotly_chart(fig_pca_qc, use_container_width=True)
+                    st.plotly_chart(fig_pca_qc, width="stretch")
             else:
                 st.info(t("upload_prompt", lang))
 
@@ -1095,7 +1095,7 @@ with tab_upload:
 
         # ── Multi Study サンプルデータボタン ────────────────────────────
         _ms_btn_text = "🧪 サンプルデータで試す（Atopic / Psoriasis / AEW）" if _is_jp else "🧪 Try Sample Data (Atopic / Psoriasis / AEW)"
-        if st.button(_ms_btn_text, use_container_width=True, key="multi_sample_btn"):
+        if st.button(_ms_btn_text, width="stretch", key="multi_sample_btn"):
             with st.status("Generating Multi-Study Sample Data...", expanded=True) as _msts:
                 _msdata = generate_multi_study_sample_data()
                 _merged_counts_list = []
@@ -1250,11 +1250,11 @@ with tab_upload:
                 _mc1.metric("遺伝子数 / Genes" if _is_jp else "Genes",        f"{_df_m.shape[0]:,}")
                 _mc2.metric("サンプル数 / Samples" if _is_jp else "Samples",  f"{_df_m.shape[1]:,}")
                 _mc3.metric("ゼロ率 / Zero rate" if _is_jp else "Zero rate",  f"{(_df_m == 0).sum().sum() / _df_m.size:.1%}")
-            st.dataframe(_df_m.head(10), use_container_width=True)
+            st.dataframe(_df_m.head(10), width="stretch")
             st.subheader("📦 Study ごとのサンプル数 / Samples per Study" if _is_jp else "📦 Samples per Study")
             st.dataframe(
                 _meta_m["batch"].value_counts().rename_axis("Study").reset_index(name="Samples"),
-                use_container_width=True
+                width="stretch"
             )
 
 # TAB 2: DEG
@@ -1381,7 +1381,7 @@ with tab_deg:
                 up = ((res["padj"] < padj_t) & (res["log2FoldChange"] > lfc_t)).sum()
                 dn = ((res["padj"] < padj_t) & (res["log2FoldChange"] < -lfc_t)).sum()
                 st.metric("Up", up); st.metric("Down", dn)
-                st.dataframe(res.head(100), use_container_width=True)
+                st.dataframe(res.head(100), width="stretch")
         # 複数コントラスト一括実行
         st.divider()
         _is_jp = st.session_state.get("lang_display", "日本語") == "日本語"
@@ -1621,7 +1621,7 @@ with tab_deg:
                         margin=dict(l=20, r=20, t=30, b=20),
                         template=plotly_template,
                     )
-                    st.plotly_chart(_fig_vp, use_container_width=True)
+                    st.plotly_chart(_fig_vp, width="stretch")
                 else:
                     try:
                         from upsetplot import from_memberships, UpSet
@@ -1685,7 +1685,7 @@ with tab_deg:
                     _filtered_df = _member_df[_member_df[_filter_sel] == "✅"]
 
                 st.caption(f"{'選択中' if _is_jp else 'Selected'}: **{_filter_sel}** — {len(_filtered_df)} genes")
-                st.dataframe(_filtered_df, use_container_width=True, height=250)
+                st.dataframe(_filtered_df, width="stretch", height=250)
 
                 # CSVダウンロード
                 st.download_button(
@@ -1708,7 +1708,7 @@ with tab_deg:
 
                     # KEGG
                     with _venn_enr_col1:
-                        if st.button("🧬 KEGG", type="primary", key="venn_kegg_btn", use_container_width=True):
+                        if st.button("🧬 KEGG", type="primary", key="venn_kegg_btn", width="stretch"):
                             try:
                                 import gseapy as gp
                                 with st.status("🧬 KEGG..."):
@@ -1731,7 +1731,7 @@ with tab_deg:
                                 template=plotly_template
                             )
                             _fig_vk.update_layout(yaxis={"categoryorder": "total ascending", "title": ""}, font=dict(size=11))
-                            st.plotly_chart(_fig_vk, use_container_width=True)
+                            st.plotly_chart(_fig_vk, width="stretch")
                             st.download_button(
                                 "📥 KEGG CSV", _vk_df.to_csv(index=False),
                                 "venn_kegg.csv", "text/csv", key="dl_venn_kegg"
@@ -1739,7 +1739,7 @@ with tab_deg:
 
                     # GO
                     with _venn_enr_col2:
-                        if st.button("🌿 GO", type="primary", key="venn_go_btn", use_container_width=True):
+                        if st.button("🌿 GO", type="primary", key="venn_go_btn", width="stretch"):
                             try:
                                 import gseapy as gp
                                 with st.status("🌿 GO..."):
@@ -1762,7 +1762,7 @@ with tab_deg:
                                 template=plotly_template
                             )
                             _fig_vg.update_layout(yaxis={"categoryorder": "total ascending", "title": ""}, font=dict(size=11))
-                            st.plotly_chart(_fig_vg, use_container_width=True)
+                            st.plotly_chart(_fig_vg, width="stretch")
                             st.download_button(
                                 "📥 GO CSV", _vg_df.to_csv(index=False),
                                 "venn_go.csv", "text/csv", key="dl_venn_go"
@@ -1832,7 +1832,7 @@ The Volcano Plot displays log2FoldChange (x-axis) and statistical significance �
             fig_v = plot_volcano_plotly(st.session_state["deg_results"], padj_t, lfc_t, up_color, down_color, template=plotly_template, font=sel_font, highlight_gene=hl, font_size=fig_font_sz)
             fig_v.update_layout(width=fig_width, height=fig_height, font=dict(family=sel_font, size=fig_font_sz))
             try:
-                event = st.plotly_chart(fig_v, use_container_width=True, config=plotly_config, on_select="rerun")
+                event = st.plotly_chart(fig_v, width="stretch", config=plotly_config, on_select="rerun")
                 sel_pts = []
                 if isinstance(event, dict):
                     sel_pts = event.get("selection", {}).get("points", [])
@@ -1848,7 +1848,7 @@ The Volcano Plot displays log2FoldChange (x-axis) and statistical significance �
                     st.success(f"🎯 なげなわ選択中 ({len(sel_genes)}個): " + ", ".join(sel_genes[:10]) + "...")
                     st.session_state["custom_gene_list"] = sel_genes
             except TypeError:
-                st.plotly_chart(fig_v, use_container_width=True, config=plotly_config)
+                st.plotly_chart(fig_v, width="stretch", config=plotly_config)
             img_v = get_img_bytes(fig_v, img_format, img_dpi)
             if img_v: st.download_button(f"📥 {t('dl_plot', lang)} ({img_format.upper()})", img_v, f"volcano.{img_format}", key="dl_v_btn")
         
@@ -1873,7 +1873,7 @@ The MA Plot shows mean expression (baseMean, x-axis, log scale) vs. log2FoldChan
             hl = st.session_state.get("search_q", "")
             fig_m = plot_ma_plotly(st.session_state["deg_results"], padj_t, up_color, down_color, template=plotly_template, font=sel_font, highlight_gene=hl, font_size=fig_font_sz)
             fig_m.update_layout(width=fig_width, height=fig_height, font=dict(family=sel_font, size=fig_font_sz))
-            st.plotly_chart(fig_m, use_container_width=True, config=plotly_config)
+            st.plotly_chart(fig_m, width="stretch", config=plotly_config)
             img_m = get_img_bytes(fig_m, img_format, img_dpi)
             if img_m: st.download_button(f"📥 {t('dl_plot', lang)} ({img_format.upper()})", img_m, f"ma_plot.{img_format}", key="dl_m_btn")
 
@@ -1932,7 +1932,7 @@ Displays normalized expression of the top N significant DEGs across all samples 
                     width=fig_width, height=max(fig_height, top_n_h * 14)
                 )
                 fig_h.update_yaxes(tickfont_size=max(6, 130 // top_n_h))
-                st.plotly_chart(fig_h, use_container_width=True, config=plotly_config)
+                st.plotly_chart(fig_h, width="stretch", config=plotly_config)
                 img_h = get_img_bytes(fig_h, img_format, img_dpi)
                 if img_h:
                     st.download_button(f"\U0001F4E5 Download heatmap ({img_format.upper()})",
@@ -2008,7 +2008,7 @@ Displays normalized expression of the top N significant DEGs across all samples 
                                      width=fig_width, height=dynamic_height, showlegend=True)
                 fig_gp.for_each_annotation(lambda a: a.update(text=f"<b>{a.text.split('=')[-1]}</b>")) # 遺伝子名を太字に
                 
-                st.plotly_chart(fig_gp, use_container_width=True, config=plotly_config)
+                st.plotly_chart(fig_gp, width="stretch", config=plotly_config)
                 img_gp = get_img_bytes(fig_gp, img_format, img_dpi)
                 if img_gp:
                     file_name_gp = f"gene_plot_panel.{img_format}"
@@ -2090,7 +2090,7 @@ with tab_network:
                 else:
                     fig = plot_enrich_dot_plotly(df, f"Top {top_n_k} KEGG ({direction_k})", plotly_template, sel_font, fig_font_sz)
                 
-                st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+                st.plotly_chart(fig, width="stretch", config=plotly_config)
                 img = get_img_bytes(fig, img_format, img_dpi)
                 if isinstance(img, bytes):
                     st.download_button(f"📥 {t('dl_plot', lang)} ({img_format.upper()})", img, f"kegg_plot.{img_format}", key="dl_kegg_btn")
@@ -2098,7 +2098,7 @@ with tab_network:
                     st.error(f"⚠️ {t('format', lang)}: {img_format.upper()} Error. Kaleido needs a restart.")
                 
                 st.write(f"### KEGG Data Table (Top {top_n_k})")
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width="stretch")
 
         with nt1_g:
             st.subheader("GO Biological Process")
@@ -2162,7 +2162,7 @@ with tab_network:
                 else:
                     fig = plot_enrich_dot_plotly(df, f"Top {top_n_g} GO ({direction_g})", plotly_template, sel_font, fig_font_sz)
                 
-                st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+                st.plotly_chart(fig, width="stretch", config=plotly_config)
                 img = get_img_bytes(fig, img_format, img_dpi)
                 if isinstance(img, bytes):
                     st.download_button(f"📥 {t('dl_plot', lang)} ({img_format.upper()})", img, f"go_plot.{img_format}", key="dl_go_btn")
@@ -2170,7 +2170,7 @@ with tab_network:
                     st.error(f"⚠️ {t('format', lang)}: {img_format.upper()} Error. Kaleido needs a restart.")
                 
                 st.write(f"### GO Data Table (Top {top_n_g})")
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width="stretch")
 
         with nt2:
             st.subheader("Preranked GSEA")
@@ -2227,7 +2227,7 @@ ORA（過剰表現解析）とは異なり、閾値で切り捨てることな�
                 else:
                     fig = plot_gsea_dot_plotly(df, f"Top {top_n_gs} GSEA Pathways (Dot)", plotly_template, sel_font, fig_font_sz)
                 
-                st.plotly_chart(fig, use_container_width=True, config=plotly_config)
+                st.plotly_chart(fig, width="stretch", config=plotly_config)
                 img = get_img_bytes(fig, img_format, img_dpi)
                 if isinstance(img, bytes):
                     st.download_button(f"📥 {t('dl_plot', lang)} ({img_format.upper()})", img, f"gsea_plot.{img_format}", key="dl_gsea_btn")
@@ -2235,7 +2235,7 @@ ORA（過剰表現解析）とは異なり、閾値で切り捨てることな�
                     st.error(f"⚠️ {t('format', lang)}: {img_format.upper()} Error. Kaleido needs a restart.")
                 
                 st.write(f"### GSEA Data Table (Top {top_n_gs})")
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width="stretch")
                 
 
         with nt_string:
@@ -2386,7 +2386,7 @@ Estimates transcription factor (TF) activity from gene expression data. Rather t
                 with res_c_tab:
                     st.caption(f"{acts_c.shape[1]} TFs estimated (CollecTRI)")
                     fig_c_tf = _tf_heatmap(acts_c, "TF Activity — CollecTRI (top 20 by mean |activity|)")
-                    st.plotly_chart(fig_c_tf, use_container_width=True, config=plotly_config)
+                    st.plotly_chart(fig_c_tf, width="stretch", config=plotly_config)
                     img_c_tf = get_img_bytes(fig_c_tf, img_format, img_dpi)
                     if img_c_tf:
                         st.download_button("Download plot", img_c_tf, f"tf_collectri.{img_format}", key="dl_ctr_btn")
@@ -2399,7 +2399,7 @@ Estimates transcription factor (TF) activity from gene expression data. Rather t
                         st.warning("Too few TFs to display a meaningful heatmap. Try expanding the DoRothEA confidence level.")
                     else:
                         fig_d_tf = _tf_heatmap(acts_d, "TF Activity — DoRothEA (top 20 by mean |activity|)")
-                        st.plotly_chart(fig_d_tf, use_container_width=True, config=plotly_config)
+                        st.plotly_chart(fig_d_tf, width="stretch", config=plotly_config)
                         img_d_tf = get_img_bytes(fig_d_tf, img_format, img_dpi)
                         if img_d_tf:
                             st.download_button("Download plot", img_d_tf, f"tf_dorothea.{img_format}", key="dl_dor_btn")
@@ -2428,7 +2428,7 @@ Estimates transcription factor (TF) activity from gene expression data. Rather t
                             x0=-_rng, y0=-_rng, x1=_rng, y1=_rng,
                             line=dict(dash="dash", color="gray", width=1))
                         fig_scatter.update_layout(font=dict(family=sel_font, size=fig_font_sz))
-                        st.plotly_chart(fig_scatter, use_container_width=True, config=plotly_config)
+                        st.plotly_chart(fig_scatter, width="stretch", config=plotly_config)
 
                         top_shared = cons_df.set_index("TF").abs().mean(axis=1).nlargest(20).index.tolist()
                         hm_data    = pd.concat([
@@ -2444,7 +2444,7 @@ Estimates transcription factor (TF) activity from gene expression data. Rather t
                             title="Shared TF activity — CollecTRI (CTR|) vs DoRothEA (DOR|)"
                         )
                         fig_cons_hm.update_layout(font=dict(family=sel_font, size=fig_font_sz), width=fig_width, height=max(fig_height, 500))
-                        st.plotly_chart(fig_cons_hm, use_container_width=True, config=plotly_config)
+                        st.plotly_chart(fig_cons_hm, width="stretch", config=plotly_config)
                         img_cons = get_img_bytes(fig_cons_hm, img_format, img_dpi)
                         if img_cons:
                             st.download_button("Download consensus heatmap", img_cons,
@@ -2593,7 +2593,7 @@ Estimates immune cell composition of each sample from bulk RNA-seq data. Uses Nu
                     fig_decon.update_layout(font=dict(family=sel_font, size=fig_font_sz),
                                             width=fig_width, height=fig_height,
                                             xaxis_tickangle=-40)
-                    st.plotly_chart(fig_decon, use_container_width=True, config=plotly_config)
+                    st.plotly_chart(fig_decon, width="stretch", config=plotly_config)
                     img_dc = get_img_bytes(fig_decon, img_format, img_dpi)
                     if img_dc:
                         st.download_button("Download plot", img_dc,
@@ -2602,7 +2602,7 @@ Estimates immune cell composition of each sample from bulk RNA-seq data. Uses Nu
                 st.download_button("Download CSV (fractions)",
                                    ciber_df.to_csv(), "deconvolution_fractions.csv",
                                    "text/csv", key="dl_dc_csv")
-                st.dataframe(ciber_df.style.format("{:.3f}"), use_container_width=True)
+                st.dataframe(ciber_df.style.format("{:.3f}"), width="stretch")
 
         with nt_corr:
             _is_jp = st.session_state.get("lang_display", "日本語") == "日本語"
@@ -2665,7 +2665,7 @@ Visualize the correlation between two genes as a scatter plot. Displays Pearson 
                     title=f"{_gene_a} vs {_gene_b}  |  {_corr_method} r = {_r:.3f}, p = {_p:.2e}"
                 )
                 _fig_corr.update_layout(font=dict(family=sel_font, size=fig_font_sz), width=fig_width, height=fig_height)
-                st.plotly_chart(_fig_corr, use_container_width=True, config=plotly_config)
+                st.plotly_chart(_fig_corr, width="stretch", config=plotly_config)
 
                 _rc1, _rc2, _rc3 = st.columns(3)
                 _rc1.metric(f"{_corr_method} r", f"{_r:.4f}")
@@ -2775,7 +2775,7 @@ with tab_meta:
                     font=dict(family=sel_font, size=fig_font_sz),
                     template=plotly_template,
                 )
-                st.plotly_chart(_fig_heat, use_container_width=True)
+                st.plotly_chart(_fig_heat, width="stretch")
 
                 # ---- 2-6. Venn / UpSet (自動切替) ----
                 st.divider()
