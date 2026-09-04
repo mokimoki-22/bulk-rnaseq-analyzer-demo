@@ -25,6 +25,10 @@
 
 ### Changed
 
+- Phase 0.5監査・指摘2: seed `20260904`の3,005遺伝子×6サンプルで、実DESeq2の
+  independent filteringと全ゼロ行のNAを検証する継続テストを追加。
+  補完前NAとフラグの一致、filtering無効時のpadj復帰、共有manifestのNA件数を確認する。
+  既存のNA4ケースのモックテストは維持。
 - Phase 0.5監査・指摘1: 入力検証に失敗してもmygene.infoの照会記録を破棄しない。
   単一／複数Studyとも全HTTP試行を呼び出し前に登録し、失敗・部分成功・キャッシュを区別。
   `services.events`は現在の入力、追加の`services.external_service_events`はセッション全履歴。
