@@ -1,0 +1,16 @@
+# Python tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.test-deps/
+
+# Local notebooks and interactive-session state
+.Rhistory
+.ipynb_checkpoints/
+
+# Streamlit's local configuration and runtime state
+.streamlit/secrets.toml
