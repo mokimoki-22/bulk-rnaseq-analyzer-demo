@@ -35,12 +35,35 @@ python -m pytest -q
 
 基準線テストは、既存モジュールのimport、人工count matrixに対する`run_deg()`、
 Streamlit AppTestによるアプリ起動、および既存の主要タブ描画を確認します。
+さらに、保存済みの変更前DEG・Exportとの互換性、NAフラグ、manifestの内容と
+共有生成器への接続、結果ありUI、外部サービス操作を検証します。
+HTTP通信と画像変換はテスト内でモックし、解析・JSON/ZIP生成は実コードを実行します。
+
+## RNA結果とprovenance
+
+DEG結果には`padj_is_na` / `lfc_is_na`が含まれます。これらはPyDESeq2の元の
+欠損値を表し、従来の数値補完（padj=1、log2FoldChange=0）は維持されます。
+`padj_is_na=True`を「検定済みで有意でない」と解釈しないでください。
+
+ExportのZIPには既存のCSV等に加えて`Provenance/manifest.json`と
+`Provenance/manifest.md`が含まれます。単独ダウンロードも同じ内容です。
+旧`reproducibility_report.json`からの項目対応はCHANGELOGに記載しています。
+
+manifestは環境・入力・設定・件数・外部サービスを記録します。アップロード原本の
+SHA-256は`inputs.rna.source_files`、アプリが保持してZIPに出力するcount matrixの
+SHA-256は`inputs.rna.count_matrix`に記録します。後者はID変換・重複処理後の行列で、
+UTF-8 CSVの実際の出力バイト列を対象とします（OSの改行差でもハッシュは変わります）。
+サンプルデータや既にメモリ上にある結果で原本がない場合、原本情報を捏造せず空欄にします。
+NAフラグのない旧結果のNA件数は`null`です。
 
 ## ネットワーク通信
 
 通常のローカル解析では、同梱のgene-setおよびTF networkを使用します。既存機能のうち、
 ユーザー操作でオンラインID mappingを選択した場合はmygene.infoへ遺伝子IDを、
 STRING networkの取得を実行した場合はstring-db.orgへ遺伝子リストを送信します。
+該当操作の前に送信先・内容種別を表示し、ユーザーによる照会をmanifestへ記録します。
+キャッシュから結果を再利用した照会も記録されるため、記録件数は実HTTP通信回数ではありません。
+新しい入力を読み込むと、以前の入力に属するサービス記録は引き継ぎません。
 
 ## ライセンスと同梱データ
 

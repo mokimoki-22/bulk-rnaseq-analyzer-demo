@@ -8,6 +8,8 @@ import multiprocessing
 import time
 import platform
 import zipfile
+import json
+import brim_provenance
 from scipy import stats
 from sklearn.decomposition import PCA
 from statsmodels.stats.multitest import multipletests
@@ -194,6 +196,9 @@ if "tf_collectri" not in st.session_state: st.session_state["tf_collectri"] = No
 if "tf_dorothea"  not in st.session_state: st.session_state["tf_dorothea"]  = None
 if "ciber_results" not in st.session_state: st.session_state["ciber_results"] = None
 if "fig_font_sz"  not in st.session_state: st.session_state["fig_font_sz"]  = 12
+if "rna_input_files" not in st.session_state: st.session_state["rna_input_files"] = []
+if "rna_id_mapping" not in st.session_state: st.session_state["rna_id_mapping"] = []
+if "external_service_events" not in st.session_state: st.session_state["external_service_events"] = []
 
 # ═══════════════════════════════════════════
 # 2. SESSION STATE
@@ -287,6 +292,16 @@ def reset_threshold_dependent_results():
 
 def log_analysis(action, details=""):
     st.session_state["analysis_log"].append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "action": action, "details": details})
+
+
+def external_service_record(service, data_type):
+    """Describe a user-requested service lookup without storing sent identifiers.
+
+    The existing cached functions may serve a lookup without a new network call.
+    """
+    return {"service": service, "data_type": data_type,
+            "timestamp": datetime.datetime.now().astimezone().isoformat(),
+            "access": "user-requested lookup; cached response may be reused"}
 
 @st.cache_data(show_spinner=False, ttl=300)
 def get_string_network_img(gene_list, species_id, limit=30, flavor="confidence"):
@@ -668,6 +683,8 @@ def run_deg(counts_df, metadata, ref_condition, test_condition, n_cpus=1):
     )
     stat_res.summary()
     res = stat_res.results_df.copy()
+    res["padj_is_na"] = res["padj"].isna()
+    res["lfc_is_na"] = res["log2FoldChange"].isna()
     res["padj"] = res["padj"].fillna(1.0)
     res["log2FoldChange"] = res["log2FoldChange"].fillna(0.0)
     res["stat"] = res["stat"].fillna(0.0)
@@ -787,6 +804,7 @@ def plot_gsea_dot_plotly(df, title, template='plotly_white', font="sans-serif", 
     return fig
 
 def collect_all_results():
+    """Collect existing result files plus one shared provenance document."""
     files = {}
     if st.session_state["counts_df"] is not None:
         files["0.1_Raw_Counts.csv"] = st.session_state["counts_df"].to_csv()
@@ -806,6 +824,45 @@ def collect_all_results():
         for entry in st.session_state["analysis_log"]:
             nb_md += f"### [{entry['time']}] {entry['action']}\n{entry['details']}\n\n"
         files["Analysis_Notebook.md"] = nb_md
+    if st.session_state["deg_results"] is not None:
+        matrix, rna_counts = brim_provenance.describe_rna_data(
+            files["0.1_Raw_Counts.csv"], st.session_state["deg_results"],
+            st.session_state.get("metadata"),
+        )
+        rna_counts["qc_genes"] = (
+            len(st.session_state["qc_filtered_df"])
+            if st.session_state.get("qc_filtered_df") is not None else None
+        )
+        events = st.session_state["external_service_events"]
+        manifest = brim_provenance.build_manifest(
+            inputs={"rna": {"source_mode": "count_matrix", "count_matrix": matrix,
+                            "source_files": st.session_state["rna_input_files"],
+                            "is_sample_data": st.session_state.get("is_sample_data", False)}},
+            settings={
+                "app_version": APP_VERSION,
+                "species": st.session_state.get("sp", {}).get("org", "unknown"),
+                "genome_build": None,
+                "rna": {
+                    "lfc_threshold": st.session_state.get("lfc_t", 1.0),
+                    "padj_threshold": st.session_state.get("padj_t", 0.05),
+                    "normalization": st.session_state.get("norm_method", "log1p"),
+                    "low_count_filtering": {
+                        "enabled": st.session_state.get("filter_enable", False),
+                        "min_count": st.session_state.get("filter_min_count", 10),
+                        "min_samples": st.session_state.get("filter_min_samples", 2),
+                    },
+                    "contrast": st.session_state.get("last_contrast", ""),
+                    "analysis_log": st.session_state.get("analysis_log", []),
+                    "gene_id_mapping": st.session_state["rna_id_mapping"],
+                    "log2fc_inverted": False,
+                },
+            },
+            counts={"rna": rna_counts},
+            services={"external_services_used": sorted({event["service"] for event in events}),
+                      "events": events},
+        )
+        files["Provenance/manifest.json"] = json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False)
+        files["Provenance/manifest.md"] = brim_provenance.render_manifest_markdown(manifest)
     return files
 
 # — Variable Initialization (Global UI/Plot variables)
@@ -1324,6 +1381,9 @@ with tab_upload:
                 with st.status(ui("🎩 Loading...", lang)) as status:
                     cdf, meta = generate_sample_data()
                     reset_data_results()
+                    st.session_state["rna_input_files"] = []
+                    st.session_state["rna_id_mapping"] = []
+                    st.session_state["external_service_events"] = []
                     st.session_state["counts_df"] = cdf
                     st.session_state["qc_filtered_df"] = cdf
                     st.session_state["metadata"] = meta
@@ -1341,15 +1401,29 @@ with tab_upload:
                 sp_sel = st.selectbox(t("species", lang), list(SPECIES_MAP.keys()))
                 _selected_species = SPECIES_MAP[sp_sel]
                 id_mode_sel = st.radio(t("gene_id_mode", lang), [t("gene_symbol_opt", lang), t("gene_ids_opt", lang)])
+                if id_mode_sel == t("gene_ids_opt", lang):
+                    st.info(ui("Loading sends gene IDs to mygene.info for symbol mapping.", lang,
+                               "読み込み時に遺伝子IDを mygene.info へ送信してsymbolに変換します。"))
                 if st.button(ui("Load", lang), type="primary"):
                     with st.status(ui("🎩 Processing...", lang), expanded=True) as status:
                         try:
                             name = uploaded_counts.name.lower()
                             sep = "\t" if name.endswith((".tsv", ".txt")) else ","
+                            _source_file = {"file_name": uploaded_counts.name,
+                                            "sha256": brim_provenance.file_checksum(uploaded_counts)}
+                            _load_services = []
+                            _load_mapping = []
                             raw_df = read_count_matrix_file(uploaded_counts, sep)
                             if id_mode_sel == t("gene_ids_opt", lang):
                                 ids = [re.sub(r'\.\d+$', '', str(idx)) for idx in raw_df.index]
+                                _load_services.append(external_service_record("mygene.info", "gene IDs"))
                                 m = run_online_mapping(ids, "mouse" if _selected_species["org"]=="mmu" else "human")
+                                _load_mapping.append({
+                                    "file_name": uploaded_counts.name, "method": "mygene.info",
+                                    "transform": "strip trailing version suffix; map IDs to symbols; retain unmatched IDs",
+                                    "unique_ids": len(set(ids)), "matched_ids": len(m),
+                                    "success_rate": len(m) / len(set(ids)) if ids else None,
+                                })
                                 if len(m) < len(set(ids)):
                                     st.warning(ui("Gene ID mapping matched {mapped} of {total} unique IDs. Unmapped IDs were retained unchanged.", lang,
                                                   mapped=len(m), total=len(set(ids))))
@@ -1360,6 +1434,9 @@ with tab_upload:
                             st.error(ui("Invalid count matrix: {error}", lang, error=_input_error))
                         else:
                             reset_data_results()
+                            st.session_state["rna_input_files"] = [_source_file]
+                            st.session_state["rna_id_mapping"] = _load_mapping
+                            st.session_state["external_service_events"] = _load_services
                             st.session_state["counts_df"] = counts_df
                             st.session_state["qc_filtered_df"] = counts_df
                             st.session_state["sp"] = _selected_species
@@ -1680,6 +1757,9 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                 _mm = pd.concat(_merged_meta_list, axis=0)
                 _mconds = list(dict.fromkeys(_mm["condition"].tolist()))
                 reset_data_results()
+                st.session_state["rna_input_files"] = []
+                st.session_state["rna_id_mapping"] = []
+                st.session_state["external_service_events"] = []
                 st.session_state["counts_df"]          = _mc
                 st.session_state["qc_filtered_df"]     = _mc
                 st.session_state["metadata"]           = _mm
@@ -1767,6 +1847,9 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                     })
 
             # ── Load All button ──────────────────────────────────────────
+            if any(_cfg["id_mode"] == "ensembl" for _cfg in _study_configs):
+                st.info(ui("Loading sends gene IDs to mygene.info for symbol mapping.", lang,
+                           "読み込み時に遺伝子IDを mygene.info へ送信してsymbolに変換します。"))
             if st.button(ui("📥 Load All Studies", lang),
                          key="multi_load_btn", type="primary"):
                 _study_names_for_load = [_cfg["name"].strip() for _cfg in _study_configs]
@@ -1802,10 +1885,15 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                 _all_meta   = []
                 _all_conds  = []
                 _loaded_names = []
+                _load_sources = []
+                _load_services = []
+                _load_mapping = []
 
                 with st.status(ui("🎩 Loading...", lang), expanded=True) as _sts:
                     for _cfg in _study_configs:
                         _f2 = _cfg["file"]
+                        _load_sources.append({"file_name": _f2.name, "study": _cfg["name"],
+                                              "sha256": brim_provenance.file_checksum(_f2)})
                         _f2.seek(0)
                         _fname2 = _f2.name.lower()
                         _sep2 = "\t" if _fname2.endswith((".tsv", ".txt")) else ","
@@ -1815,7 +1903,14 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                             st.write(ui("🔗 Mapping Ensembl IDs for {study}...", lang, study=_cfg['name']))
                             _ids2 = [re.sub(r'\.\d+$', '', str(_x)) for _x in _raw.index]
                             _org2 = "mouse" if _cfg["sp"]["org"] == "mmu" else "human"
+                            _load_services.append(external_service_record("mygene.info", "gene IDs"))
                             _map2 = run_online_mapping(_ids2, _org2)
+                            _load_mapping.append({
+                                "file_name": _f2.name, "study": _cfg["name"], "method": "mygene.info",
+                                "transform": "strip trailing version suffix; map IDs to symbols; retain unmatched IDs",
+                                "unique_ids": len(set(_ids2)), "matched_ids": len(_map2),
+                                "success_rate": len(_map2) / len(set(_ids2)) if _ids2 else None,
+                            })
                             if len(_map2) < len(set(_ids2)):
                                 st.warning(ui("Gene ID mapping matched {mapped} of {total} unique IDs. Unmapped IDs were retained unchanged.", lang,
                                               mapped=len(_map2), total=len(set(_ids2))))
@@ -1868,6 +1963,9 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                         st.stop()
 
                     reset_data_results()
+                    st.session_state["rna_input_files"] = _load_sources
+                    st.session_state["rna_id_mapping"] = _load_mapping
+                    st.session_state["external_service_events"] = _load_services
                     st.session_state["counts_df"]        = _merged_counts
                     st.session_state["qc_filtered_df"]   = _merged_counts
                     st.session_state["metadata"]         = _merged_meta
@@ -3847,6 +3945,8 @@ ORA（過剰表現解析）とは異なり、閾値で切り捨てることな�
             _string_disabled = (_deg_res_ctrl is None or _n_sig_degs == 0)
             if _string_disabled:
                 st.info("ℹ️ " + (ui("No significant DEGs found. Try decreasing 'LFC threshold' (e.g. 0.5) or increasing 'padj threshold' (e.g. 0.1) in the sidebar and rerun.", lang, '有意なDEGが見つかりませんでした。左サイドバーの「LFC threshold」を小さく（例: 0.5）、「padj threshold」を大きく（例: 0.1）してから再実行してみてください。')))
+            st.info(ui("Fetching a network sends the gene list to string-db.org.", lang,
+                       "ネットワーク取得時に遺伝子リストを string-db.org へ送信します。"))
             if st.button(t("string_run_btn", lang), disabled=_string_disabled):
                 res_deg = st.session_state["deg_results"]
                 # Use top DEGs for network
@@ -3855,6 +3955,9 @@ ORA（過剰表現解析）とは異なり、閾値で切り捨てることな�
                     st.warning(ui("No significant genes for network construction.", lang))
                 else:
                     with st.status(ui("🎩 Fetching network...", lang)):
+                        st.session_state["external_service_events"].append(
+                            external_service_record("string-db.org", "gene list")
+                        )
                         img_s = get_string_network_img(sig_genes, st.session_state["sp"]["string_id"], flavor=string_flavor)
                     if img_s:
                         st.image(img_s, caption="STRING Interaction Network (Top Genes)")
@@ -4585,9 +4688,10 @@ with tab_meta:
 with tab_export:
     if st.session_state["deg_results"] is not None:
         st.subheader(ui("📦 Package Export", lang))
+        export_files = collect_all_results()
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as z:
-            for f, d in collect_all_results().items():
+            for f, d in export_files.items():
                 z.writestr(f, d)
         st.download_button(
             ui("📦 Download Results ZIP", lang),
@@ -4599,24 +4703,10 @@ with tab_export:
         
         st.divider()
         st.subheader(ui("📝 Reproducibility", lang))
-        import json
-        repro_data = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "app_version": APP_VERSION,
-            "species": st.session_state.get("sp", {}).get("org", "unknown"),
-            "deg_parameters": {
-                "lfc_threshold": st.session_state.get("lfc_t", 1.0),
-                "padj_threshold": st.session_state.get("padj_t", 0.05),
-                "normalization": st.session_state.get("norm_method", "log1p"),
-                "low_count_filtering": {
-                    "enabled": st.session_state.get("filter_enable", False),
-                    "min_count": st.session_state.get("filter_min_count", 10),
-                    "min_samples": st.session_state.get("filter_min_samples", 2)
-                }
-            },
-            "contrasts": st.session_state.get("analysis_log", [])
-        }
-        st.download_button(t("dl_report", lang), json.dumps(repro_data, indent=2), "reproducibility_report.json", "application/json")
+        st.download_button(t("dl_report", lang), export_files["Provenance/manifest.json"],
+                           "manifest.json", "application/json")
+        st.download_button(ui("Download provenance (Markdown)", lang, "Provenanceをダウンロード (Markdown)"),
+                           export_files["Provenance/manifest.md"], "manifest.md", "text/markdown")
     else:
         _is_jp = st.session_state.get("lang_display", "日本語") == "日本語"
         if _is_jp:

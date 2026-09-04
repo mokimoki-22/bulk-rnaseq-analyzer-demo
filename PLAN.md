@@ -1,7 +1,7 @@
 # PLAN.md — BRIM v2.0 実装計画
 
 - 対応設計書: `B`docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
-- 現在Phase: **Phase 0.5**
+- 現在Phase: **Phase 1**
 - 最終更新: 2026-09-04
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
@@ -32,7 +32,7 @@ ATAC追加前のbaseline testが再現可能。
 
 ## Phase 0.5: 既存コードの前提整備
 
-**状態:** 未着手
+**状態:** 完了（2026-09-04）
 **設計書参照:** §3.4, §16.1, §16.3
 
 このPhaseをATAC実装より前に置く理由は、統合分類のロジックが `padj_is_na`
@@ -77,6 +77,17 @@ ATAC追加前のbaseline testが再現可能。
 - NA件数がmanifestに記録される
 - RNA count matrix の SHA-256 がmanifestに含まれる
 - 外部サービス使用時に画面表示があり、manifestに記録される
+
+**完了記録**
+- 段階1の変更前DEG・JSON・ZIP fixtureを独立コミット`22ad00b`に保存してから実装。
+- 監査項目1〜5（既存6列の数値互換性、NA4ケース、結果ありExport、共有manifestの
+  単体・接続、結果ありUIと外部サービス記録）をすべて検証。Phase 2への繰り延べなし。
+- `Provenance/manifest.json` / `Provenance/manifest.md`を既存ZIPに追加し、
+  単独ダウンロードとの内容一致をテスト。旧JSON全項目の対応表はCHANGELOGに記載。
+- Windows / Python 3.12で全37テスト成功。既存3テストは変更なし。
+  人工小規模データでの既存PyDESeq2 dispersion fallback警告3件あり。
+- AppTestで初期起動、英語・日本語の結果あり画面、単一／複数Studyの読み込みを確認。
+  HTTP通信と静的画像変換はモック。GitHub Actionsの4環境実行は未確認。
 
 ---
 
