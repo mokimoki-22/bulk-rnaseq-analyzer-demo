@@ -9,6 +9,7 @@ import time
 import platform
 import zipfile
 import json
+from contextlib import contextmanager
 import brim_provenance
 from scipy import stats
 from sklearn.decomposition import PCA
@@ -199,6 +200,7 @@ if "fig_font_sz"  not in st.session_state: st.session_state["fig_font_sz"]  = 12
 if "rna_input_files" not in st.session_state: st.session_state["rna_input_files"] = []
 if "rna_id_mapping" not in st.session_state: st.session_state["rna_id_mapping"] = []
 if "external_service_events" not in st.session_state: st.session_state["external_service_events"] = []
+if "external_service_history" not in st.session_state: st.session_state["external_service_history"] = []
 
 # ═══════════════════════════════════════════
 # 2. SESSION STATE
@@ -294,17 +296,66 @@ def log_analysis(action, details=""):
     st.session_state["analysis_log"].append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "action": action, "details": details})
 
 
-def external_service_record(service, data_type):
-    """Describe a user-requested service lookup without storing sent identifiers.
+def external_service_record(service, data_type, source=None):
+    """Journal a lookup before execution; never discard it on input failure."""
+    history = st.session_state["external_service_history"]
+    event = {"event_id": len(history) + 1, "service": service, "data_type": data_type,
+             "timestamp": datetime.datetime.now().astimezone().isoformat(),
+             "source": dict(source) if source is not None else None,
+             "input_outcome": "pending" if source is not None else "not_applicable",
+             "lookup_outcome": "pending", "access": "pending", "requests": []}
+    history.append(event)
+    return event
 
-    The existing cached functions may serve a lookup without a new network call.
-    """
-    return {"service": service, "data_type": data_type,
-            "timestamp": datetime.datetime.now().astimezone().isoformat(),
-            "access": "user-requested lookup; cached response may be reused"}
+
+@contextmanager
+def service_input_attempt():
+    """Reject uncommitted lookup associations even on st.stop or exceptions."""
+    events = []
+    try:
+        yield events
+    finally:
+        for event in events:
+            if event["input_outcome"] == "pending":
+                event["input_outcome"] = "rejected"
+
+
+def service_post(event, url, data):
+    """Record every real HTTP attempt before sending, including failed chunks."""
+    request = {"timestamp": datetime.datetime.now().astimezone().isoformat(),
+               "outcome": "pending", "http_status": None}
+    event["requests"].append(request)
+    try:
+        response = requests.post(url, data=data, timeout=30)
+    except Exception as error:
+        request.update(outcome="failed", error_type=type(error).__name__)
+        raise
+    request.update(http_status=response.status_code,
+                   outcome="success" if response.status_code == 200 else "failed")
+    return response, request
+
+
+def service_lookup(event, cached_lookup, *args, **kwargs):
+    """Keep cached results separate from actual requests in this session."""
+    try:
+        value, outcome = cached_lookup(*args, _event=event, **kwargs)
+        event["lookup_outcome"] = outcome
+        return value
+    except Exception as error:
+        event.update(lookup_outcome="failed", error_type=type(error).__name__)
+        raise
+    finally:
+        event["access"] = "network" if event["requests"] else "cache"
+
+
+def get_string_network_img(gene_list, species_id, limit=30, flavor="confidence", *, event=None):
+    """Fetch the existing STRING image while retaining the lookup's outcome."""
+    if event is None:
+        event = external_service_record("string-db.org", "gene list")
+    return service_lookup(event, _cached_string_network_img, gene_list, species_id, limit, flavor)
 
 @st.cache_data(show_spinner=False, ttl=300)
-def get_string_network_img(gene_list, species_id, limit=30, flavor="confidence"):
+def _cached_string_network_img(gene_list, species_id, limit, flavor, _event):
     url = "https://string-db.org/api/image/network"
     params = {
         "identifiers": "\r".join(gene_list[:limit]),
@@ -313,29 +364,56 @@ def get_string_network_img(gene_list, species_id, limit=30, flavor="confidence")
         "network_flavor": flavor
     }
     try:
-        res = requests.post(url, data=params, timeout=30)
-        return res.content if res.status_code == 200 else None
+        res, _ = service_post(_event, url, params)
+        return (res.content, "success") if res.status_code == 200 else (None, "failed")
     except requests.RequestException:
-        return None
+        return None, "failed"
 
 # ═══════════════════════════════════════════
 # 3. ANALYSIS HELPERS
 # ═══════════════════════════════════════════
+def run_online_mapping(id_list, species_id, *, event=None):
+    """Map IDs with the existing cache, preserving request and lookup outcomes."""
+    if event is None:
+        event = external_service_record("mygene.info", "gene IDs")
+    return service_lookup(event, _cached_online_mapping, id_list, species_id)
+
+
 @st.cache_data(show_spinner=False, ttl=300)
-def run_online_mapping(id_list, species_id):
+def _cached_online_mapping(id_list, species_id, _event):
     mapped_dict = {}
+    failed = False
     for i in range(0, len(id_list), 1000):
         chunk = id_list[i:i+1000]
+        request = None
         try:
-            res = requests.post("https://mygene.info/v3/query", data={'q':",".join(chunk),'scopes':'ensembl.gene,entrezgene,refseq,uniprot','species':species_id,'fields':'symbol'}, timeout=30)
+            res, request = service_post(_event, "https://mygene.info/v3/query", {'q':",".join(chunk),'scopes':'ensembl.gene,entrezgene,refseq,uniprot','species':species_id,'fields':'symbol'})
             if res.status_code == 200:
-                for item in res.json():
-                    if 'symbol' in item: mapped_dict[item.get('query')] = item['symbol']
-        except (requests.RequestException, ValueError, TypeError):
-            pass
+                payload = res.json()
+                if not isinstance(payload, list):
+                    raise ValueError("Mapping response must be a list.")
+                for item in payload:
+                    if (not isinstance(item, dict) or not isinstance(item.get("query"), str)
+                            or item["query"] not in chunk
+                            or ("symbol" in item and (not isinstance(item["symbol"], str) or not item["symbol"]))):
+                        raise ValueError("Invalid mapping response entry.")
+                    if 'symbol' in item:
+                        mapped_dict[item['query']] = item['symbol']
+            else:
+                failed = True
+        except (requests.RequestException, ValueError, TypeError) as error:
+            failed = True
+            if request is not None:
+                request.update(outcome="failed", error_type=type(error).__name__)
         if i + 1000 < len(id_list):
             time.sleep(0.3)
-    return mapped_dict
+    if not failed and len(mapped_dict) == len(set(id_list)):
+        outcome = "success"
+    elif mapped_dict:
+        outcome = "partial"
+    else:
+        outcome = "failed" if failed else "unmapped"
+    return mapped_dict, outcome
 
 
 
@@ -858,8 +936,10 @@ def collect_all_results():
                 },
             },
             counts={"rna": rna_counts},
-            services={"external_services_used": sorted({event["service"] for event in events}),
-                      "events": events},
+            services={"external_services_used": sorted({event["service"] for event in events
+                                                       if event.get("lookup_outcome") in ("success", "partial")}),
+                      "events": events,
+                      "external_service_events": st.session_state["external_service_history"]},
         )
         files["Provenance/manifest.json"] = json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False)
         files["Provenance/manifest.md"] = brim_provenance.render_manifest_markdown(manifest)
@@ -1405,19 +1485,18 @@ with tab_upload:
                     st.info(ui("Loading sends gene IDs to mygene.info for symbol mapping.", lang,
                                "読み込み時に遺伝子IDを mygene.info へ送信してsymbolに変換します。"))
                 if st.button(ui("Load", lang), type="primary"):
-                    with st.status(ui("🎩 Processing...", lang), expanded=True) as status:
+                    with st.status(ui("🎩 Processing...", lang), expanded=True) as status, service_input_attempt() as _load_services:
                         try:
                             name = uploaded_counts.name.lower()
                             sep = "\t" if name.endswith((".tsv", ".txt")) else ","
                             _source_file = {"file_name": uploaded_counts.name,
                                             "sha256": brim_provenance.file_checksum(uploaded_counts)}
-                            _load_services = []
                             _load_mapping = []
                             raw_df = read_count_matrix_file(uploaded_counts, sep)
                             if id_mode_sel == t("gene_ids_opt", lang):
                                 ids = [re.sub(r'\.\d+$', '', str(idx)) for idx in raw_df.index]
-                                _load_services.append(external_service_record("mygene.info", "gene IDs"))
-                                m = run_online_mapping(ids, "mouse" if _selected_species["org"]=="mmu" else "human")
+                                _load_services.append(external_service_record("mygene.info", "gene IDs", _source_file))
+                                m = run_online_mapping(ids, "mouse" if _selected_species["org"]=="mmu" else "human", event=_load_services[-1])
                                 _load_mapping.append({
                                     "file_name": uploaded_counts.name, "method": "mygene.info",
                                     "transform": "strip trailing version suffix; map IDs to symbols; retain unmatched IDs",
@@ -1433,6 +1512,8 @@ with tab_upload:
                             status.update(label=ui("❌ Invalid count matrix", lang), state="error", expanded=True)
                             st.error(ui("Invalid count matrix: {error}", lang, error=_input_error))
                         else:
+                            for _event in _load_services:
+                                _event["input_outcome"] = "accepted"
                             reset_data_results()
                             st.session_state["rna_input_files"] = [_source_file]
                             st.session_state["rna_id_mapping"] = _load_mapping
@@ -1886,10 +1967,9 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                 _all_conds  = []
                 _loaded_names = []
                 _load_sources = []
-                _load_services = []
                 _load_mapping = []
 
-                with st.status(ui("🎩 Loading...", lang), expanded=True) as _sts:
+                with st.status(ui("🎩 Loading...", lang), expanded=True) as _sts, service_input_attempt() as _load_services:
                     for _cfg in _study_configs:
                         _f2 = _cfg["file"]
                         _load_sources.append({"file_name": _f2.name, "study": _cfg["name"],
@@ -1903,8 +1983,8 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                             st.write(ui("🔗 Mapping Ensembl IDs for {study}...", lang, study=_cfg['name']))
                             _ids2 = [re.sub(r'\.\d+$', '', str(_x)) for _x in _raw.index]
                             _org2 = "mouse" if _cfg["sp"]["org"] == "mmu" else "human"
-                            _load_services.append(external_service_record("mygene.info", "gene IDs"))
-                            _map2 = run_online_mapping(_ids2, _org2)
+                            _load_services.append(external_service_record("mygene.info", "gene IDs", _load_sources[-1]))
+                            _map2 = run_online_mapping(_ids2, _org2, event=_load_services[-1])
                             _load_mapping.append({
                                 "file_name": _f2.name, "study": _cfg["name"], "method": "mygene.info",
                                 "transform": "strip trailing version suffix; map IDs to symbols; retain unmatched IDs",
@@ -1963,6 +2043,8 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                         st.stop()
 
                     reset_data_results()
+                    for _event in _load_services:
+                        _event["input_outcome"] = "accepted"
                     st.session_state["rna_input_files"] = _load_sources
                     st.session_state["rna_id_mapping"] = _load_mapping
                     st.session_state["external_service_events"] = _load_services
@@ -3955,10 +4037,9 @@ ORA（過剰表現解析）とは異なり、閾値で切り捨てることな�
                     st.warning(ui("No significant genes for network construction.", lang))
                 else:
                     with st.status(ui("🎩 Fetching network...", lang)):
-                        st.session_state["external_service_events"].append(
-                            external_service_record("string-db.org", "gene list")
-                        )
-                        img_s = get_string_network_img(sig_genes, st.session_state["sp"]["string_id"], flavor=string_flavor)
+                        _service_event = external_service_record("string-db.org", "gene list")
+                        st.session_state["external_service_events"].append(_service_event)
+                        img_s = get_string_network_img(sig_genes, st.session_state["sp"]["string_id"], flavor=string_flavor, event=_service_event)
                     if img_s:
                         st.image(img_s, caption="STRING Interaction Network (Top Genes)")
                         st.download_button(ui("📥 Download STRING Network Image", lang), img_s, "string_network.png", key="dl_string_btn")

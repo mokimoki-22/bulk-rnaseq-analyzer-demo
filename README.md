@@ -62,8 +62,23 @@ NAフラグのない旧結果のNA件数は`null`です。
 ユーザー操作でオンラインID mappingを選択した場合はmygene.infoへ遺伝子IDを、
 STRING networkの取得を実行した場合はstring-db.orgへ遺伝子リストを送信します。
 該当操作の前に送信先・内容種別を表示し、ユーザーによる照会をmanifestへ記録します。
-キャッシュから結果を再利用した照会も記録されるため、記録件数は実HTTP通信回数ではありません。
-新しい入力を読み込むと、以前の入力に属するサービス記録は引き継ぎません。
+実行したHTTP試行は、その後の入力検証の成否によらず記録します。
+manifestの`services`は次のように区別します。
+
+- `external_services_used`: 現在の入力に属し、成功または部分成功した照会のサービス名。
+- `events`: 現在の入力に属する照会。失敗した照会も結果を明示して保持します。
+- `external_service_events`: セッション全体の照会履歴。入力差し替えでは消去しません。
+  `event_id`で現在の`events`と対応し、`source`に入力名・SHA-256（複数StudyではStudy名も）、
+  `input_outcome`に`accepted` / `rejected` / `not_applicable`を記録します。
+  全Studyの採用前に失敗した場合、その読み込みの照会はすべて`rejected`です。
+
+各照会の`lookup_outcome`は`success` / `partial` / `unmapped` / `failed`、
+`access`は`network` / `cache`です。`requests`には実際のHTTP試行ごとに日時・
+HTTP status・結果・例外の型を記録します。送信IDや応答本文、例外メッセージは保存しません。
+キャッシュ再利用の照会も履歴に残りますが、その照会の`requests`は空で、
+過去のHTTPを新規通信として数えません。通信途中は`pending`として記録されます。
+履歴はStreamlitセッション内の記録であり、アプリ終了を越える永続ログではありません。
+manifestのダウンロードは従来どおりDEG結果があるときに利用できます。
 
 ## ライセンスと同梱データ
 

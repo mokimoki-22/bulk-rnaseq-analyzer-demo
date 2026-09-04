@@ -1,7 +1,7 @@
 # PLAN.md — BRIM v2.0 実装計画
 
 - 対応設計書: `B`docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
-- 現在Phase: **Phase 1**
+- 現在Phase: **Phase 0.5（監査指摘修正）**
 - 最終更新: 2026-09-04
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
@@ -32,7 +32,7 @@ ATAC追加前のbaseline testが再現可能。
 
 ## Phase 0.5: 既存コードの前提整備
 
-**状態:** 完了（2026-09-04）
+**状態:** 監査指摘修正中（2026-09-04）
 **設計書参照:** §3.4, §16.1, §16.3
 
 このPhaseをATAC実装より前に置く理由は、統合分類のロジックが `padj_is_na`
@@ -78,7 +78,7 @@ ATAC追加前のbaseline testが再現可能。
 - RNA count matrix の SHA-256 がmanifestに含まれる
 - 外部サービス使用時に画面表示があり、manifestに記録される
 
-**完了記録**
+**初回実装記録（監査修正前）**
 - 段階1の変更前DEG・JSON・ZIP fixtureを独立コミット`22ad00b`に保存してから実装。
 - 監査項目1〜5（既存6列の数値互換性、NA4ケース、結果ありExport、共有manifestの
   単体・接続、結果ありUIと外部サービス記録）をすべて検証。Phase 2への繰り延べなし。
@@ -88,6 +88,17 @@ ATAC追加前のbaseline testが再現可能。
   人工小規模データでの既存PyDESeq2 dispersion fallback警告3件あり。
 - AppTestで初期起動、英語・日本語の結果あり画面、単一／複数Studyの読み込みを確認。
   HTTP通信と静的画像変換はモック。GitHub Actionsの4環境実行は未確認。
+
+**監査後の修正範囲**
+- 指摘1: 実行された外部HTTP試行を、後続処理の結果によらずセッション履歴へ保持する。
+  現在の入力に属する照会と全履歴を分離し、通信結果・入力採用結果・キャッシュを記録する。
+  timeout、非200、不正応答、部分的mapping、単一／複数Studyの入力検証失敗をテストする。
+- 指摘2: 固定seedの実DESeq2によるindependent filtering・全ゼロ行のNAを継続テストに追加する。
+  補完前NAとの一致と、independent filtering無効時のpadj復帰を検証する。
+- 既存37テストと変更前fixtureは弱めず、指摘1・2は別コミットとする。
+- 下記の追加的な既存機能検証とInteraction経路の修正は、ユーザー指定によりPhase 2へ繰り延べる。
+- 指摘1修正時点: Windows / Python 3.12で53テスト成功（既存37件＋異常系16件）。
+  既存の小規模DESeq2入力に由来する警告3件。
 
 ---
 
@@ -145,6 +156,12 @@ StreamlitなしでATAC annotationが完結し、期待edgeと一致する。
 - ATAC plot／table／download
 - session state追加と `reset_atac_results()`
 - UI tests
+
+**Phase 0.5監査からの繰り延べ（ユーザー指定）**
+- Meta解析・TF解析・Interaction Analysisの各機能の結果を揃えた検証。
+  理由: Phase 0.5の範囲を超え、既存全機能のテスト整備に発散するため。
+- Interaction Analysis経路のpadj/LFC補完をI-1.1に適合させる。
+  初回コミット由来の既存処理であり、Phase 0.5では変更しない。
 
 **完了条件**
 RNA入力なしでATAC単独解析が完了する。

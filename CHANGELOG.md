@@ -25,6 +25,13 @@
 
 ### Changed
 
+- Phase 0.5監査・指摘1: 入力検証に失敗してもmygene.infoの照会記録を破棄しない。
+  単一／複数Studyとも全HTTP試行を呼び出し前に登録し、失敗・部分成功・キャッシュを区別。
+  `services.events`は現在の入力、追加の`services.external_service_events`はセッション全履歴。
+  `external_services_used`は現在の入力に属する成功／部分成功照会のサービス名とする。
+  timeout・非200・不正応答・部分的mapping・入力検証失敗の回帰テストを追加。
+- 監査で追加指摘されたMeta／TF／Interactionの結果あり検証と、既存InteractionのNA対応は
+  ユーザー指定によりPhase 2へ繰り延べ（PLAN参照）。既存37テスト・段階1fixtureは変更しない。
 - MIT著作権者を当面「Motoki Morita」とする。公開前に所属機関の知財ポリシーを確認して確定する。
 - 旧`reproducibility_report.json`の情報は以下へ移行（日時はExport生成時刻であり固定値ではない）。
 
