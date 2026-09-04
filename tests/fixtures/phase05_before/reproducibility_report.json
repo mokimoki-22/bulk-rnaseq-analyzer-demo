@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-09-04T21:39:56.181801",
+  "app_version": "1.1.0",
+  "species": "mmu",
+  "deg_parameters": {
+    "lfc_threshold": 0.7,
+    "padj_threshold": 0.1,
+    "normalization": "log1p",
+    "low_count_filtering": {
+      "enabled": true,
+      "min_count": 12,
+      "min_samples": 3
+    }
+  },
+  "contrasts": [
+    {
+      "time": "12:34:56",
+      "action": "DEG",
+      "details": "treated vs control"
+    }
+  ]
+}
