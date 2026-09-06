@@ -32,6 +32,12 @@
 
 ### Changed
 
+- Fixed the pinned GENCODE generation-script checksum check on Windows.  The
+  script is now checked out with LF line endings through `.gitattributes`,
+  because the manifest records a byte-level SHA-256.  Ubuntu already checked
+  out LF and passed; Windows otherwise materialized CRLF and therefore produced
+  a different digest even though the script source and generated `.tsv.gz`
+  files were unchanged.
 - ATAC count matrix正規化は明示選択とし、DESeq2 median-of-ratiosを既定候補、
   事前フィルタは既定無効（有効時の初期候補は全サンプル合計count 10未満）とした。
 - interval joinは依存を追加せずpandas/NumPyで実装。20万peakの性能要件またはinterval

@@ -1,0 +1,4 @@
+# The manifest records this script's byte-level SHA-256.  Keep its checkout
+# representation stable across Linux and Windows so the recorded digest remains
+# reproducible.
+scripts/build_gene_annotations.py text eol=lf

@@ -377,6 +377,12 @@ def test_reference_manifest_and_both_pinned_builds_are_loadable():
         assert annotation["reference_build"].eq(expected_build).all()
 
 
+def test_generation_script_checksum_is_checkout_stable():
+    """Keep the manifest's byte-level script checksum reproducible on Windows."""
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "scripts/build_gene_annotations.py text eol=lf" in attributes
+
+
 def test_sample_peak_count_matrix_and_metadata_are_usable():
     counts = brim_atac.read_peak_count_matrix(
         ROOT / "sample_data" / "BRIM_ATAC_peak_counts.csv", ",", "index", "0-based",
