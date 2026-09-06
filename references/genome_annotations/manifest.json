@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-06T05:44:13.431079+00:00",
+  "release_policy": "Pinned; update data and manifest in a dedicated commit and record it in CHANGELOG.md.",
+  "files": {
+    "hg38": {
+      "source": "GENCODE",
+      "species": "human",
+      "build": "GRCh38",
+      "release": "48",
+      "assembly": "GRCh38.p14",
+      "download_url": "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_48/gencode.v48.annotation.gtf.gz",
+      "source_page": "https://www.gencodegenes.org/human/release_48.html",
+      "file": "hg38_genes.tsv.gz",
+      "rows": 78686,
+      "source_sha256": "37a298c2b57e41988cfe12667134106523c69c24a1807347679d19e88aa1f4a9",
+      "sha256": "317307f0e14d82a16a495bb5f26250c22b1da52d554e3bfe96ebbe7ef7abe086",
+      "generation_script": "scripts/build_gene_annotations.py",
+      "generation_script_sha256": "a91bd89537a58fc1475b8cbfe56465d5f509d6ad77e55d1dae8dd8d7ded959b2",
+      "generation_command": "python scripts/build_gene_annotations.py --input-dir <download-dir> --output-dir references/genome_annotations",
+      "license_terms": "GENCODE open-access data: https://www.gencodegenes.org/pages/data_access.html"
+    },
+    "mm10": {
+      "source": "GENCODE",
+      "species": "mouse",
+      "build": "GRCm38",
+      "release": "M25",
+      "assembly": "GRCm38.p6",
+      "download_url": "https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/gencode.vM25.annotation.gtf.gz",
+      "source_page": "https://www.gencodegenes.org/mouse/release_M25.html",
+      "file": "mm10_genes.tsv.gz",
+      "rows": 55401,
+      "source_sha256": "e6c9704cb5832b8a1c71431ecac9ea30057377c72cdc9a12dc5d0405ab066d5a",
+      "sha256": "fa27e7baf96ca3cb20ff5997983eb49aaa23b90d85b2dbf4a31072c2750717e7",
+      "generation_script": "scripts/build_gene_annotations.py",
+      "generation_script_sha256": "a91bd89537a58fc1475b8cbfe56465d5f509d6ad77e55d1dae8dd8d7ded959b2",
+      "generation_command": "python scripts/build_gene_annotations.py --input-dir <download-dir> --output-dir references/genome_annotations",
+      "license_terms": "GENCODE open-access data: https://www.gencodegenes.org/pages/data_access.html"
+    }
+  }
+}
