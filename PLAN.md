@@ -1,8 +1,8 @@
 # PLAN.md — BRIM v2.0 実装計画
 
-- 対応設計書: `B`docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
+- 対応設計書: `docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
 - 現在Phase: **Phase 1**
-- 最終更新: 2026-09-04
+- 最終更新: 2026-09-06
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
@@ -111,13 +111,14 @@ ATAC追加前のbaseline testが再現可能。
   ユーザー承認によりPhase 0.5を完了とする。
 - STRING応答判定、既存機能の結果あり検証、Interaction経路のNA対応はPhase 2で扱う。
 - 実外部API・Windows portable配布物の動作確認はPhase 7の前提とする。
-- 4環境CIの成功確認は未完了であり、Phase 1実装の着手条件として残す。
+- Phase 0.5完了承認時点では4環境CI未確認だったため、Phase 1実装の着手条件として残した。
+  その後commit `29f0814`のCI #1で4環境成功を確認し、下記のとおり条件を充足した。
 
 ---
 
 ## Phase 1: ATAC core
 
-**状態:** 未着手（4環境CI成功確認待ち）
+**状態:** 実装完了・監査待ち（2026-09-06）
 **設計書参照:** §7.1–7.3, §8.1–8.2, §9, §14.1
 
 **実装着手条件**
@@ -126,6 +127,13 @@ ATAC追加前のbaseline testが再現可能。
 - 対象コミットとActionsの実行結果を確認する。workflow定義の存在や、
   ローカルWindows / Python 3.12での成功だけでは、この条件を満たしたことにしない。
 - 成功確認まではPhase 1の実装に着手しない。
+
+**着手条件の充足記録**
+- GitHub Actions `CI #1`、commit `29f0814`、所要3m58sで4環境すべて成功。
+- 成功ジョブ: Ubuntu / Python 3.11、Ubuntu / Python 3.12、Windows / Python 3.11、
+  Windows / Python 3.12。
+- 実行結果: `https://github.com/mokimoki-22/bulk-rnaseq-analyzer-demo/actions`
+- 条件を解除したのではなく充足したため、Phase 1へ着手する。
 
 **作業**
 - `brim_atac.py` を新規作成（Streamlit非依存）
@@ -154,11 +162,33 @@ StreamlitなしでATAC annotationが完結し、期待edgeと一致する。
 - 一対多 mapping が保持される
 - 最大距離外が unmapped になる
 
-**未決事項（Phase 1中に決定）**
-- interval join を pandas/NumPy で実装するか `bioframe` を採用するか
-- gene annotation の source と release
-- count matrix モードの既定正規化方式
-- peak数20万超の実行時間対策
+**決定事項（2026-09-06）**
+- interval joinはpandas/NumPyで自前実装する。`bioframe`は依存に追加せず、
+  実測で必要性が認められた場合に公開APIの内部実装として差し替え可能に保つ。
+- gene annotationはGENCODEに固定する。
+  HumanはRelease 48（GRCh38/hg38）、MouseはRelease M25（GRCm38/mm10）。
+  実装時点の最新版へ自動追従せず、release更新は意図的な判断として別コミットにし、
+  CHANGELOGへ記録する。`references/genome_annotations/manifest.json`にrelease、
+  download URL、SHA-256、生成スクリプトを記録する。
+- count matrixモードの既定候補はDESeq2 median-of-ratios。ただし暗黙適用せず、
+  ユーザーの明示選択を必須としprovenanceへ記録する。Phase 2 UIでは選択肢の近くに、
+  globalなaccessibility変化がある場合は偏りうる旨を1行で表示する。
+- 事前フィルタは既定無効。チェックボックスを有効にした場合のみ適用し、
+  初期閾値は「全サンプル合計count < 10」とする。閾値は編集可能にし、
+  除外件数をPhase 2 UIとprovenanceの両方へ記録する。
+
+**Phase 1実装・検証記録（2026-09-06）**
+- `brim_atac.py`、固定GENCODE gene/TSS table、生成・benchmark script、両入力モードの
+  sample data、`tests/test_atac.py`を追加した。Streamlit UIとsession stateは変更していない。
+- 固定seedのhg38 benchmark（200,000 peaks、78,686 reference genes）で、promoter overlap
+  1.129秒、nearest TSS 2.054秒、合計3.182秒。`scripts/benchmark_atac_mapping.py`で再現可能。
+  現時点では性能上の差し替え条件に該当しないため、`bioframe`は追加しない。
+- 既存54件を無変更で維持し、新規34件を加えた全88テストがWindows / Python 3.12で成功。
+  既存の小規模RNA fixtureに由来するPyDESeq2警告3件と、環境のpytest cache権限警告1件あり。
+- 実PyDESeq2でmedian-of-ratios、total reads in peaks、user-supplied size factorsの3経路、
+  同梱120-peak sample、all-zero peakのNAフラグを確認。
+- 新規dependencyなし。Phase 2 UIが共有manifestへ接続する際は、`run_dar()`が返す
+  normalization、size factors、prefilter設定・除外件数を`settings.atac` / `counts.atac`へ記録する。
 
 ---
 

@@ -4,8 +4,10 @@ BRIMは、Streamlitで動作するBulk RNA-seq解析アプリです。カウン�
 PyDESeq2による差次的発現解析、可視化、経路濃縮解析、TF activity推定、ネットワーク表示、
 デコンボリューション、出力を提供します。
 
-現在はv1.1.0を基準線として固定しています。RNA-seqとATAC-seqの統合機能は、
-`PLAN.md`に定義されたPhase順に追加します。
+v1.1.0をRNA-onlyの基準線として固定し、`PLAN.md`に定義されたPhase順で
+RNA-seqとATAC-seqの統合機能を追加しています。Phase 1ではStreamlit非依存の
+ATAC core（count matrix / 解析済みDARの標準化、DAR推定、GENCODE TSSを使う
+promoter / nearest-TSS mapping）を提供します。UIはPhase 2で追加します。
 
 ## 必要環境
 
@@ -38,6 +40,20 @@ Streamlit AppTestによるアプリ起動、および既存の主要タブ描画
 さらに、保存済みの変更前DEG・Exportとの互換性、NAフラグ、manifestの内容と
 共有生成器への接続、結果ありUI、外部サービス操作を検証します。
 HTTP通信と画像変換はテスト内でモックし、解析・JSON/ZIP生成は実コードを実行します。
+ATAC coreのテストでは両入力形式、NA保持、3種類の明示的な正規化、座標変換、
+strand-aware mapping、nearest-TSS tie、一対多edge、固定GENCODE参照も検証します。
+
+## ATAC core（Phase 1、Python API）
+
+`brim_atac.py`はStreamlitをimportせず、DataFrameと明示設定だけを受け取ります。
+count matrixは`chr1:100200-100700`形式または`chrom,start,end`列形式、解析済みDARは
+標準列または対応aliasを受け付けます。座標系、genome build、正規化方式、padj/LFC閾値は
+推測せず呼び出し側が指定します。サンプル入力は`sample_data/BRIM_ATAC_*`にあります。
+
+count matrixの正規化はDESeq2 median-of-ratios、total reads in peaks、user-supplied
+size factorsに対応します。事前フィルタは既定無効で、有効時の初期候補は全サンプル合計
+count 10未満の除外です。選択方式、size factor、入力・除外・解析peak数は返却DataFrameの
+`attrs`に保持され、Phase 2で共有manifestへ接続します。
 
 ## RNA結果とprovenance
 
@@ -93,6 +109,13 @@ Petitprez et al., *Genome Medicine* 12, 86 (2020),
 
 同梱のKEGG/GO gene setとCollecTRI/DoRothEA networkについては、各ディレクトリの
 READMEを参照してください。
+
+`references/genome_annotations/`には、GENCODE Human Release 48（GRCh38.p14）と
+Mouse Release M25（GRCm38.p6）から生成したgene/TSS gzip TSVを同梱します。
+GENCODEデータは[open access](https://www.gencodegenes.org/pages/data_access.html)です。
+release、公式download URL、元GTFと生成物のSHA-256、生成スクリプトは同ディレクトリの
+`manifest.json`に固定しています。release更新は結果の再現性に影響するため、参照データと
+manifestを別コミットで意図的に更新し、CHANGELOGへ記録します。
 
 ## 開発への参加
 

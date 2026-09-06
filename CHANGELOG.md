@@ -7,6 +7,13 @@
 
 ### Added
 
+- Phase 1: Streamlit非依存の`brim_atac.py`を追加。peak count matrixの2座標形式、
+  解析済みDARのschema/alias検証、PyDESeq2によるDAR推定、NAフラグ、strand-aware
+  promoter overlap、nearest-TSS tie、一対多edge、QC/BED helperを実装。
+- GENCODE Human Release 48（GRCh38.p14）とMouse Release M25（GRCm38.p6）から生成した
+  固定gene/TSS gzip TSV、manifest、再生成スクリプトを追加。release更新は参照データと
+  manifestの専用コミットで行い、本CHANGELOGへ記録する運用とした。
+- ATACのcount matrix / metadata / 解析済みDAR sample dataとPhase 1 unit testsを追加。
 - GitHub ActionsによるWindows/Ubuntu、Python 3.11/3.12のbaseline CI
 - 既存RNA workflowの回帰基準テスト
 - Phase 0.5: `run_deg()`が補完前のNAを`padj_is_na` / `lfc_is_na`として保持。
@@ -25,6 +32,10 @@
 
 ### Changed
 
+- ATAC count matrix正規化は明示選択とし、DESeq2 median-of-ratiosを既定候補、
+  事前フィルタは既定無効（有効時の初期候補は全サンプル合計count 10未満）とした。
+- interval joinは依存を追加せずpandas/NumPyで実装。20万peakの性能要件またはinterval
+  semanticsの維持に失敗した場合のみ、公開APIを保ったまま`bioframe`を再検討する。
 - Phase 0.5監査・指摘2: seed `20260904`の3,005遺伝子×6サンプルで、実DESeq2の
   independent filteringと全ゼロ行のNAを検証する継続テストを追加。
   補完前NAとフラグの一致、filtering無効時のpadj復帰、共有manifestのNA件数を確認する。

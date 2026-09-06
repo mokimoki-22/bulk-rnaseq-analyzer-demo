@@ -401,6 +401,18 @@ ATAC-seqではリードの相当割合がpeak外に分布し、その割合は�
 
 選択した方式はprovenanceへ記録する。既定の選択肢を用意することは妨げないが、選択したことがログに残る形とする。
 
+既定候補として最初に提示する方式は **DESeq2 median-of-ratios** とする。ただし、これは
+暗黙の既定値として解析へ適用せず、ユーザーが明示的に選択してから実行する。
+globalなaccessibility変化がある場合はpeakの大半が不変という前提が崩れ、
+median-of-ratiosが偏りうる旨を、Phase 2 UIの選択肢の近くに1行で表示する。
+選択値はprovenanceへ記録する。
+
+**事前フィルタ**
+
+count matrixの事前フィルタは既定で無効とする。UIではチェックボックスを既定オフにし、
+有効化した場合だけ閾値を編集可能にする。初期閾値は「全サンプル合計count < 10を除外」。
+適用の有無、閾値、入力peak数、除外peak数、解析対象peak数を画面とprovenanceに記録する。
+
 **サンプル数の扱い**
 
 各群のサンプル数を表示し、次の基準で警告する。機能は無効化しない。
@@ -507,6 +519,7 @@ log2FoldChange
 pvalue
 padj
 padj_is_na               # 検定されなかったことを示す
+lfc_is_na                # log2FoldChangeが推定されなかったことを示す
 is_significant
 accessibility_direction  # opening / closing / not_significant / not_tested
 input_row
@@ -532,6 +545,7 @@ reference_release
 atac_log2FoldChange
 atac_padj
 atac_padj_is_na
+atac_lfc_is_na
 ```
 
 ### 8.3 統合edgeテーブル
@@ -634,8 +648,8 @@ nearest TSSは距離に基づく候補であり、機能的enhancer–gene関係
 
 初期対応buildを次とする。
 
-- Human: hg38 / GRCh38
-- Mouse: mm10 / GRCm38
+- Human: hg38 / GRCh38 — GENCODE Release 48（GRCh38.p14）
+- Mouse: mm10 / GRCm38 — GENCODE Release M25（GRCm38.p6）
 
 将来追加候補: hg19 / GRCh37、mm39 / GRCm39
 
@@ -649,9 +663,18 @@ nearest TSSは距離に基づく候補であり、機能的enhancer–gene関係
 - SHA-256 checksum
 - generation script
 
-BRIM本体へは完全なGTFではなく、必要列に限定した圧縮済みgene/TSS tableを同梱する。
+releaseは再現性のため上記に固定し、実装時点の最新版へ自動追従しない。
+release更新は意図的な判断として参照データ・manifestを別コミットで更新し、
+CHANGELOGへ記録する。source pageはHuman Release 48を
+`https://www.gencodegenes.org/human/release_48.html`、Mouse Release M25を
+`https://www.gencodegenes.org/mouse/release_M25.html`とする。
 
-既存BRIMは `references/*.csv` をglobで自動走査して `_EXTERNAL_REFS` へ読み込む方式を採っている。genome annotationはサイズと構造が異なるため `references/genome_annotations/` 以下にParquetとmanifestで配置し、既存のglob対象と分離する。両者を1つの機構へ統合しないことを意図的な設計判断として記録する。
+BRIM本体へは完全なGTFではなく、必要列に限定したgzip圧縮TSVのgene/TSS tableを同梱する。
+Parquetは追加エンジンを必要とするためPhase 1では採用せず、Windows portable環境で
+標準ライブラリとpandasだけで読める形式を優先する。保存形式は`load_gene_annotation()`の
+内部へ隠蔽し、将来の形式変更で利用側APIを変えない。
+
+既存BRIMは `references/*.csv` をglobで自動走査して `_EXTERNAL_REFS` へ読み込む方式を採っている。genome annotationはサイズと構造が異なるため `references/genome_annotations/` 以下に圧縮TSVとmanifestで配置し、既存のglob対象と分離する。両者を1つの機構へ統合しないことを意図的な設計判断として記録する。
 
 ### 9.5 相関ベースlinkingを主機能に置かない理由
 
@@ -908,12 +931,16 @@ brim-app/
 ### 14.1 `brim_atac.py`
 
 ```python
-read_peak_count_matrix(file_obj, sep, coordinate_column_mode) -> pd.DataFrame
+read_peak_count_matrix(file_obj, sep, coordinate_column_mode, coordinate_system) -> pd.DataFrame
 parse_peak_coordinates(index_or_columns) -> pd.DataFrame
 run_dar(counts_df, metadata, ref_condition, test_condition,
-        normalization, n_cpus) -> pd.DataFrame
-read_dar_table(file_obj, sep, column_map) -> pd.DataFrame
-validate_dar_table(df, coordinate_system) -> ValidationResult
+        normalization, n_cpus, padj_threshold, lfc_threshold,
+        prefilter_enabled=False, prefilter_total_count=10,
+        size_factors=None) -> pd.DataFrame
+read_dar_table(file_obj, sep, padj_threshold, lfc_threshold,
+               coordinate_system, column_map=None) -> pd.DataFrame
+validate_dar_table(df, coordinate_system, padj_threshold,
+                   lfc_threshold) -> ValidationResult
 standardize_chromosomes(df, build) -> tuple[pd.DataFrame, TransformLog]
 load_gene_annotation(build) -> pd.DataFrame
 map_peaks_to_promoters(peaks, genes, upstream, downstream) -> pd.DataFrame
