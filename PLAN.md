@@ -1,11 +1,13 @@
 # PLAN.md — BRIM v2.0 実装計画
 
 - 対応設計書: `B`docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
-- 現在Phase: **Phase 0.5（監査指摘修正）**
+- 現在Phase: **Phase 1**
 - 最終更新: 2026-09-04
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
+ただし、GitHub ActionsのUbuntu/Windows × Python 3.11/3.12の4環境すべてで
+CI成功を確認するまでは、Phase 1の実装に着手しない。
 
 ---
 
@@ -32,7 +34,7 @@ ATAC追加前のbaseline testが再現可能。
 
 ## Phase 0.5: 既存コードの前提整備
 
-**状態:** 監査指摘修正完了・再監査待ち（2026-09-04）
+**状態:** 完了 — PASS WITH ISSUES（2026-09-04、ユーザー承認）
 **設計書参照:** §3.4, §16.1, §16.3
 
 このPhaseをATAC実装より前に置く理由は、統合分類のロジックが `padj_is_na`
@@ -104,12 +106,26 @@ ATAC追加前のbaseline testが再現可能。
 - 最小起動確認: 初期／結果ありAppTest、モックなしPNG生成、ローカルStreamlitサーバーの
   health応答200を確認。確認用サーバーは停止済み。実外部API通信と4環境CIは未確認。
 
+**再監査後の完了承認と残存事項**
+- コミット`7a5ae25`・`59b7794`の再監査はPASS WITH ISSUES。指摘1・2の解消を確認し、
+  ユーザー承認によりPhase 0.5を完了とする。
+- STRING応答判定、既存機能の結果あり検証、Interaction経路のNA対応はPhase 2で扱う。
+- 実外部API・Windows portable配布物の動作確認はPhase 7の前提とする。
+- 4環境CIの成功確認は未完了であり、Phase 1実装の着手条件として残す。
+
 ---
 
 ## Phase 1: ATAC core
 
-**状態:** 未着手
+**状態:** 未着手（4環境CI成功確認待ち）
 **設計書参照:** §7.1–7.3, §8.1–8.2, §9, §14.1
+
+**実装着手条件**
+- GitHub Actionsで`ubuntu-latest` / `windows-latest` × Python `3.11` / `3.12`の
+  4環境すべてが成功していることを確認する。
+- 対象コミットとActionsの実行結果を確認する。workflow定義の存在や、
+  ローカルWindows / Python 3.12での成功だけでは、この条件を満たしたことにしない。
+- 成功確認まではPhase 1の実装に着手しない。
 
 **作業**
 - `brim_atac.py` を新規作成（Streamlit非依存）
@@ -162,10 +178,16 @@ StreamlitなしでATAC annotationが完結し、期待edgeと一致する。
 - UI tests
 
 **Phase 0.5監査からの繰り延べ（ユーザー指定）**
+- STRING応答判定の修正（Phase 0.5再監査で発見）。
+  HTTP 200かつ空本文／不正画像の場合にmanifestの`lookup_outcome`が`success`となり、
+  画面表示と一致しない。HTTP通信の成功と画像取得の成功を分けて記録し、
+  空応答・不正画像のテストを追加する。
+  既存STRING機能の応答判定の問題であり、Phase 0.5の変更によって生じた問題ではない。
 - Meta解析・TF解析・Interaction Analysisの各機能の結果を揃えた検証。
+  Phase 0.5監査の指摘3から繰り延べ済み。
   理由: Phase 0.5の範囲を超え、既存全機能のテスト整備に発散するため。
 - Interaction Analysis経路のpadj/LFC補完をI-1.1に適合させる。
-  初回コミット由来の既存処理であり、Phase 0.5では変更しない。
+  Phase 0.5監査の※印。初回コミット由来の既存処理であり、Phase 0.5では変更しない。
 
 **完了条件**
 RNA入力なしでATAC単独解析が完了する。
@@ -298,6 +320,12 @@ sample dataからTF候補が提示され、背景と多重検定の扱いが結�
 
 **状態:** 未着手
 **設計書参照:** §17.3, §21
+
+**前提（Phase 0.5再監査からの残存事項）**
+- 実外部API（mygene.info / string-db.org）での動作確認。
+- Windows portable配布物の動作確認。
+  いずれも現時点では未確認。モックによるHTTPテストや開発環境での起動確認だけで、
+  確認済みとして扱わない。
 
 **作業**
 - 公開paired datasetによるcase study
