@@ -1,7 +1,7 @@
 # PLAN.md — BRIM v2.0 実装計画
 
 - 対応設計書: `docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
-- 現在Phase: **Phase 1**
+- 現在Phase: **Phase 2**
 - 最終更新: 2026-09-19
 
 ## Current development status
@@ -9,19 +9,19 @@
 この節を、PCやCodexを切り替えて作業を再開するときの唯一の現在地とする。
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
-- **Current phase:** Phase 1 — ATAC core
-- **Status:** 監査修正完了、再監査待ち
-- **Last synchronized commit:** `993a691` — 開発再開・PC切替手順を文書化
-- **Last verified CI:** CI #3、`f06b376`、Ubuntu/Windows × Python 3.11/3.12の
-  4環境すべて成功、88 passed。`aeb5e93`は`.gitignore`のみの同期用変更である。
+- **Current phase:** Phase 2 — ATAC UI
+- **Status:** Phase 1完了（再監査: PASS）。Phase 2は未着手。
+- **Last implementation commit:** `e9ab8f1` — Phase 1 coordinate provenance and boundary fixes
+- **Last verified CI:** GitHub Actions run `35436666286`、`e9ab8f1`、Ubuntu/Windows ×
+  Python 3.11/3.12の4環境すべて成功。ローカル全95テストも成功。
 - **Completed remediation:** 1-based closedの単一塩基peak変換、座標transform logの
   `read_dar_table()`および`run_dar()`への伝播、promoter境界・複数peak→同一gene・
   3正規化方式の回帰テスト、設計書§13の`.tsv.gz`表記への修正。
 - **Verification:** Python 3.12で全95テスト成功。実DESeq2の小規模synthetic inputに由来する
   dispersion trend fallback警告6件あり。
-- **Next task:** Phase 1の再監査を行い、Acceptance criteria、I-2.1、I-2.2、I-2.3、
-  I-3.1、I-3.2、I-4.2への適合を確認する。
-- **Do not start:** 再監査でPhase 1の完了を確認するまで、Phase 2には着手しない。
+- **Next task:** ユーザーから明示的な指示を受けた後、PLAN.mdのPhase 2に記載された
+  ATAC UIだけを実装する。
+- **Do not start:** Phase 3以降には着手しない。Phase 2でも既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
@@ -137,7 +137,7 @@ ATAC追加前のbaseline testが再現可能。
 
 ## Phase 1: ATAC core
 
-**状態:** 監査修正完了・再監査待ち（2026-09-19）
+**状態:** 完了 — PASS（再監査、2026-09-19）
 **設計書参照:** §7.1–7.3, §8.1–8.2, §9, §14.1
 
 **実装着手条件**
