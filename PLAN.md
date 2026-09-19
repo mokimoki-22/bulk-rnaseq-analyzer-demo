@@ -10,7 +10,7 @@
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
 - **Current phase:** Phase 2 — ATAC UI
-- **Status:** Phase 1完了（再監査: PASS）。Phase 2は未着手。
+- **Status:** Phase 2進行中。ATAC UI（Phase 2A）を実装・検証済み。
 - **Last implementation commit:** `e9ab8f1` — Phase 1 coordinate provenance and boundary fixes
 - **Last verified CI:** GitHub Actions run `35436666286`、`e9ab8f1`、Ubuntu/Windows ×
   Python 3.11/3.12の4環境すべて成功。ローカル全95テストも成功。
@@ -19,8 +19,8 @@
   3正規化方式の回帰テスト、設計書§13の`.tsv.gz`表記への修正。
 - **Verification:** Python 3.12で全95テスト成功。実DESeq2の小規模synthetic inputに由来する
   dispersion trend fallback警告6件あり。
-- **Next task:** ユーザーから明示的な指示を受けた後、PLAN.mdのPhase 2に記載された
-  ATAC UIだけを実装する。
+- **Next task:** Phase 0.5から繰り延べたSTRING応答判定、Meta/TF/Interactionの
+  結果あり検証、Interaction AnalysisのNA補完を、ATAC UIと別コミットで実装・検証する。
 - **Do not start:** Phase 3以降には着手しない。Phase 2でも既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
@@ -367,7 +367,7 @@ sample dataからTF候補が提示され、背景と多重検定の扱いが結�
 
 ## Phase 7: 検証と公開
 
-**状態:** 未着手
+**状態:** 進行中 — ATAC UI（Phase 2A）実装・検証済み、繰延べ既存機能項目が残る
 **設計書参照:** §17.3, §21
 
 **前提（Phase 0.5再監査からの残存事項）**

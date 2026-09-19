@@ -10,6 +10,8 @@ import platform
 import zipfile
 import json
 from contextlib import contextmanager
+from dataclasses import asdict
+import brim_atac
 import brim_provenance
 from scipy import stats
 from sklearn.decomposition import PCA
@@ -230,6 +232,41 @@ if "padj_t"         not in st.session_state: st.session_state["padj_t"]         
 if "deg_t"          not in st.session_state: st.session_state["deg_t"]          = (1.0, 0.05)
 
 
+_ATAC_STATE_DEFAULTS = {
+    "atac_input_mode": "count_matrix",
+    "atac_counts_df": None,
+    "atac_metadata": None,
+    "atac_normalization": None,
+    "atac_input_df": None,
+    "atac_validated_df": None,
+    "atac_validation_report": None,
+    "atac_genome_build": "hg38",
+    "atac_species": "Human",
+    "atac_contrast": None,
+    "atac_mapping_settings": {"upstream": 2000, "downstream": 500, "max_distance": 100_000},
+    "atac_peak_gene_edges": None,
+    "atac_unmapped_peaks": None,
+    "atac_results": None,
+    "atac_qc_summary": None,
+    "atac_uploaded_file_signature": None,
+    "integration_edge_results": None,
+    "integration_gene_results": None,
+    "integration_settings": None,
+    "integration_summary": None,
+    "integration_enrichment": None,
+    "integration_tf_results": None,
+    "integration_motif_results": None,
+    "integration_motif_source": None,
+    "integration_provenance": None,
+}
+
+for _atac_key, _atac_default in _ATAC_STATE_DEFAULTS.items():
+    if _atac_key not in st.session_state:
+        st.session_state[_atac_key] = (
+            _atac_default.copy() if isinstance(_atac_default, (dict, list)) else _atac_default
+        )
+
+
 _DATA_RESULT_DEFAULTS = {
     "deg_results": None,
     "last_contrast": "",
@@ -261,6 +298,50 @@ def reset_data_results():
     for key, default in _DATA_RESULT_DEFAULTS.items():
         st.session_state[key] = default.copy() if isinstance(default, (dict, list)) else default
     st.session_state["analysis_log"] = []
+
+
+def reset_tf_integration_results():
+    """Clear future level-2/3 outputs after an upstream ATAC/RNA change."""
+    for key in ("integration_enrichment", "integration_tf_results", "integration_motif_results",
+                "integration_motif_source", "integration_provenance"):
+        st.session_state[key] = None
+
+
+def reset_integration_results():
+    """Clear every future level-1 integration output without deleting ATAC input."""
+    for key in ("integration_edge_results", "integration_gene_results", "integration_settings",
+                "integration_summary"):
+        st.session_state[key] = None
+    reset_tf_integration_results()
+
+
+def reset_peak_mapping_results():
+    """Clear mapping outputs and all downstream integration outputs."""
+    for key in ("atac_peak_gene_edges", "atac_unmapped_peaks", "atac_qc_summary"):
+        st.session_state[key] = None
+    reset_integration_results()
+
+
+def reset_atac_results():
+    """Clear all results derived from ATAC input while preserving uploaded input state."""
+    st.session_state["atac_validated_df"] = None
+    st.session_state["atac_validation_report"] = None
+    st.session_state["atac_results"] = None
+    reset_peak_mapping_results()
+
+
+def reset_atac_input():
+    """Clear ATAC input and every result that depends on it."""
+    for key in ("atac_counts_df", "atac_metadata", "atac_input_df", "atac_contrast",
+                "atac_uploaded_file_signature"):
+        st.session_state[key] = None
+    reset_atac_results()
+
+
+def reset_atac_species_mapping():
+    """Select the supported build for the explicitly selected species and clear mappings."""
+    st.session_state["atac_genome_build"] = "hg38" if st.session_state["atac_species"] == "Human" else "mm10"
+    reset_peak_mapping_results()
 
 
 def has_data_results():
@@ -1269,8 +1350,274 @@ if st.session_state.get("upload_mode") is not None:
             msg = ui('🧪 **Using Sample Data (Mouse, 12 samples, 3 groups) — Demo only**\n\nThis dataset is for demonstration purposes only. Expression patterns are artificially constructed and do not represent real experimental data or biological dispersion.', lang, '🧪 **サンプルデータを使用中 (Mouse, 12 samples, 3 groups)**\n\nこのデータは機能デモ専用です。遺伝子発現パターンは人工的に設定されており、実際の実験データを代表するものではありません。')
         st.warning(msg)
 
-tab_upload, tab_deg, tab_viz, tab_network, tab_meta, tab_export, tab_info = st.tabs([
-    ui("Upload", lang), ui("DEG", lang), ui("Visualization", lang), ui("Network", lang), ui("🔬 Meta", lang), ui("Export", lang), ui("Info", lang)
+def _atac_separator(label):
+    return "\t" if label == "TSV" else ","
+
+
+def _atac_uploaded_signature(uploaded_file, mode):
+    if uploaded_file is None:
+        return None
+    return mode, getattr(uploaded_file, "name", "uploaded"), getattr(uploaded_file, "size", None)
+
+
+def _render_atac_results(lang):
+    results = st.session_state.get("atac_results")
+    if results is None:
+        return
+    st.divider()
+    st.subheader(ui("ATAC-seq results", lang, "ATAC-seq結果"))
+    warnings = results.attrs.get("warnings", [])
+    for warning in warnings:
+        st.warning(warning)
+    significant = int(results["is_significant"].sum())
+    not_tested = int(results["padj_is_na"].astype(bool).sum())
+    metrics = st.columns(4)
+    metrics[0].metric(ui("Peaks", lang, "peak数"), len(results))
+    metrics[1].metric(ui("Significant", lang, "有意"), significant)
+    metrics[2].metric(ui("Not tested", lang, "未検定"), not_tested)
+    metrics[3].metric(ui("Mapped peaks", lang, "対応付け済みpeak"),
+                      0 if st.session_state.get("atac_peak_gene_edges") is None
+                      else st.session_state["atac_peak_gene_edges"]["peak_id"].nunique())
+    plot_data = results.copy()
+    plot_data["minus_log10_padj"] = -np.log10(plot_data["padj"].clip(lower=np.finfo(float).tiny))
+    figure = px.scatter(
+        plot_data, x="log2FoldChange", y="minus_log10_padj",
+        color="accessibility_direction", hover_name="peak_id",
+        labels={"log2FoldChange": "log2 fold change", "minus_log10_padj": "-log10(padj)"},
+    )
+    st.plotly_chart(figure, use_container_width=True)
+    st.dataframe(results, use_container_width=True)
+    st.download_button(
+        ui("Download DAR table", lang, "DAR表をダウンロード"), results.to_csv(index=False).encode("utf-8"),
+        file_name="BRIM_ATAC_DAR_results.csv", mime="text/csv", key="atac_download_dar",
+    )
+    edges = st.session_state.get("atac_peak_gene_edges")
+    if edges is not None:
+        st.subheader(ui("Peak–gene annotation", lang, "peak–geneアノテーション"))
+        st.dataframe(edges, use_container_width=True)
+        st.download_button(
+            ui("Download peak–gene edges", lang, "peak–gene edgeをダウンロード"),
+            edges.to_csv(index=False).encode("utf-8"), file_name="BRIM_ATAC_peak_gene_edges.csv",
+            mime="text/csv", key="atac_download_edges",
+        )
+
+
+def _render_atac_annotation_controls(lang):
+    results = st.session_state.get("atac_results")
+    if results is None:
+        return
+    with st.expander(ui("Annotation settings", lang, "アノテーション設定"), expanded=False):
+        species = st.radio(
+            ui("Species", lang, "種"), ["Human", "Mouse"], horizontal=True, key="atac_species",
+            on_change=reset_atac_species_mapping,
+        )
+        available_builds = ["hg38"] if species == "Human" else ["mm10"]
+        build = st.selectbox(
+            ui("Genome build (selected explicitly)", lang, "ゲノムビルド（明示選択）"),
+            available_builds, key="atac_genome_build", on_change=reset_peak_mapping_results,
+        )
+        columns = st.columns(3)
+        upstream = int(columns[0].number_input(ui("Promoter upstream (bp)", lang, "プロモーター上流（bp）"),
+                                                 min_value=0, value=2000, step=100, key="atac_upstream",
+                                                 on_change=reset_peak_mapping_results))
+        downstream = int(columns[1].number_input(ui("Promoter downstream (bp)", lang, "プロモーター下流（bp）"),
+                                                   min_value=0, value=500, step=100, key="atac_downstream",
+                                                   on_change=reset_peak_mapping_results))
+        maximum_distance = int(columns[2].number_input(ui("Nearest-TSS maximum distance (bp)", lang, "nearest TSS最大距離（bp）"),
+                                                         min_value=0, value=100_000, step=10_000,
+                                                         key="atac_maximum_distance", on_change=reset_peak_mapping_results))
+        if st.button(ui("Annotate peaks", lang, "peakをアノテーション"), key="atac_annotate"):
+            try:
+                standardized, transform = brim_atac.standardize_chromosomes(results, build)
+                standardized.attrs = results.attrs.copy()
+                standardized.attrs["transforms"] = list(results.attrs.get("transforms", ())) + [asdict(transform)]
+                genes = brim_atac.load_gene_annotation(build)
+                promoter_edges = brim_atac.map_peaks_to_promoters(standardized, genes, upstream, downstream)
+                nearest_edges = brim_atac.map_peaks_to_nearest_tss(standardized, genes, maximum_distance)
+                edges = brim_atac.merge_peak_gene_evidence(promoter_edges, nearest_edges)
+                mapped = set() if edges.empty else set(edges["peak_id"])
+                st.session_state["atac_results"] = standardized
+                st.session_state["atac_peak_gene_edges"] = edges
+                st.session_state["atac_unmapped_peaks"] = standardized.loc[~standardized["peak_id"].isin(mapped)].copy()
+                settings = {"species": species, "genome_build": build, "upstream": upstream,
+                            "downstream": downstream, "max_distance": maximum_distance}
+                st.session_state["atac_mapping_settings"] = settings
+                st.session_state["atac_qc_summary"] = brim_atac.summarize_atac_qc(standardized, edges, settings)
+                st.success(ui("Peak annotation completed.", lang, "peakアノテーションが完了しました。"))
+            except brim_atac.ATACError as error:
+                st.error(str(error))
+
+
+def _render_atac_count_matrix_controls(uploaded_file, separator, lang):
+    layout = st.radio(
+        ui("Peak coordinate layout", lang, "peak座標形式"), ["index", "columns"], horizontal=True,
+        format_func=lambda value: "chr:start-end index" if value == "index" else "chrom / start / end columns",
+        key="atac_coordinate_layout", on_change=reset_atac_input,
+    )
+    coordinate_system = st.radio(
+        ui("Input coordinate system", lang, "入力座標系"), ["0-based", "1-based"], horizontal=True,
+        format_func=lambda value: "0-based half-open" if value == "0-based" else "1-based closed",
+        key="atac_coordinate_system", on_change=reset_atac_input,
+    )
+    if st.button(ui("Load peak count matrix", lang, "peak count matrixを読み込む"), key="atac_load_counts"):
+        try:
+            counts = brim_atac.read_peak_count_matrix(uploaded_file, separator, layout, coordinate_system)
+            st.session_state["atac_counts_df"] = counts
+            st.session_state["atac_input_df"] = counts
+            reset_atac_results()
+            st.success(ui("Peak count matrix validated. Assign conditions below.", lang, "peak count matrixを検証しました。下で群を指定してください。"))
+        except brim_atac.ATACError as error:
+            st.error(str(error))
+    counts = st.session_state.get("atac_counts_df")
+    if counts is None:
+        return
+    sample_columns = [column for column in counts.columns if column not in {"peak_id", "chrom", "start", "end"}]
+    st.caption(ui("Assign a condition to every ATAC sample.", lang, "すべてのATACサンプルに群を指定してください。"))
+    assignments = {}
+    for index, sample in enumerate(sample_columns):
+        default = "Control" if index < len(sample_columns) / 2 else "Treatment"
+        assignments[sample] = st.text_input(sample, value=default, key=f"atac_condition_{sample}",
+                                            on_change=reset_atac_results).strip()
+    if not all(assignments.values()):
+        st.warning(ui("Every sample needs a condition name.", lang, "すべてのサンプルに群名が必要です。"))
+        return
+    metadata = pd.DataFrame({"condition": pd.Series(assignments)})
+    st.session_state["atac_metadata"] = metadata
+    conditions = list(dict.fromkeys(metadata["condition"]))
+    if len(conditions) < 2:
+        st.warning(ui("At least two conditions are required for DAR.", lang, "DARには少なくとも2群が必要です。"))
+        return
+    contrast_columns = st.columns(2)
+    reference = contrast_columns[0].selectbox(ui("Reference condition", lang, "基準群"), conditions,
+                                                key="atac_reference_condition", on_change=reset_atac_results)
+    test = contrast_columns[1].selectbox(ui("Test condition", lang, "比較群"), conditions,
+                                          index=1, key="atac_test_condition", on_change=reset_atac_results)
+    _render_atac_dar_run_controls(counts, metadata, reference, test, lang)
+
+
+def _render_atac_dar_run_controls(counts, metadata, reference, test, lang):
+    normalization_labels = {
+        None: ui("Select normalization…", lang, "正規化法を選択…"),
+        "deseq2_median_of_ratios": "DESeq2 median-of-ratios",
+        "total_reads_in_peaks": "Total reads in peaks",
+        "user_supplied_size_factors": "User-supplied size factors",
+    }
+    normalization = st.selectbox(
+        ui("Normalization (required)", lang, "正規化（必須）"), list(normalization_labels),
+        format_func=normalization_labels.get, key="atac_normalization", on_change=reset_atac_results,
+    )
+    st.caption(ui("Median-of-ratios can be biased when accessibility changes globally; select it deliberately.", lang,
+                  "accessibilityが全体的に変化する場合、median-of-ratiosは偏ることがあります。明示的に選択してください。"))
+    prefilter = st.checkbox(ui("Enable pre-filter", lang, "事前フィルタを有効化"), value=False,
+                             key="atac_prefilter_enabled", on_change=reset_atac_results)
+    threshold = int(st.number_input(ui("Exclude peaks with total count below", lang, "全サンプル合計countがこれ未満のpeakを除外"),
+                                    min_value=0, value=10, key="atac_prefilter_total_count",
+                                    disabled=not prefilter, on_change=reset_atac_results))
+    threshold_columns = st.columns(2)
+    padj_threshold = float(threshold_columns[0].number_input(ui("ATAC padj threshold", lang, "ATAC padj閾値"),
+                                                               min_value=0.0, max_value=1.0, value=0.05,
+                                                               key="atac_padj_threshold", on_change=reset_atac_results))
+    lfc_threshold = float(threshold_columns[1].number_input(ui("ATAC |log2FC| threshold", lang, "ATAC |log2FC|閾値"),
+                                                              min_value=0.0, value=1.0,
+                                                              key="atac_lfc_threshold", on_change=reset_atac_results))
+    factors = None
+    if normalization == "user_supplied_size_factors":
+        st.caption(ui("Provide a positive size factor for each sample.", lang, "各サンプルに正のsize factorを入力してください。"))
+        factors = {sample: st.number_input(f"{sample} size factor", min_value=0.000001, value=1.0,
+                                            key=f"atac_size_factor_{sample}", on_change=reset_atac_results)
+                   for sample in metadata.index}
+    if st.button(ui("Run DAR", lang, "DARを実行"), key="atac_run_dar"):
+        if normalization is None:
+            st.error(ui("Select a normalization method before running DAR.", lang, "DAR実行前に正規化法を選択してください。"))
+            return
+        try:
+            result = brim_atac.run_dar(
+                counts, metadata, reference, test, normalization, n_cpus=1,
+                padj_threshold=padj_threshold, lfc_threshold=lfc_threshold,
+                prefilter_enabled=prefilter, prefilter_total_count=threshold, size_factors=factors,
+            )
+            st.session_state["atac_results"] = result
+            st.session_state["atac_validated_df"] = result
+            st.session_state["atac_contrast"] = {"reference": reference, "test": test}
+            st.session_state["atac_validation_report"] = {"source_mode": "count_matrix", "transforms": result.attrs.get("transforms", [])}
+            reset_peak_mapping_results()
+            st.success(ui("DAR completed.", lang, "DARが完了しました。"))
+        except (brim_atac.ATACError, ValueError) as error:
+            st.error(str(error))
+
+
+def _render_atac_dar_table_controls(uploaded_file, separator, lang):
+    try:
+        uploaded_file.seek(0)
+        source_columns = list(pd.read_csv(uploaded_file, sep=separator, nrows=0).columns)
+    except Exception as error:
+        st.error(ui(f"Could not read DAR header: {error}", lang, f"DARヘッダーを読めません: {error}"))
+        return
+    st.caption(ui("Confirm a source column when automatic alias detection is insufficient.", lang,
+                  "自動alias認識で不十分な場合は、元の列を明示指定してください。"))
+    column_map = {}
+    for target in ("chrom", "start", "end", "log2FoldChange", "padj"):
+        selected = st.selectbox(target, ["Automatic"] + source_columns, key=f"atac_map_{target}",
+                                on_change=reset_atac_results)
+        if selected != "Automatic":
+            column_map[target] = selected
+    coordinate_system = st.radio(ui("Input coordinate system", lang, "入力座標系"), ["0-based", "1-based"],
+                                 horizontal=True, key="atac_dar_coordinate_system", on_change=reset_atac_results)
+    columns = st.columns(2)
+    padj_threshold = float(columns[0].number_input(ui("ATAC padj threshold", lang, "ATAC padj閾値"), 0.0, 1.0, 0.05,
+                                                     key="atac_dar_padj_threshold", on_change=reset_atac_results))
+    lfc_threshold = float(columns[1].number_input(ui("ATAC |log2FC| threshold", lang, "ATAC |log2FC|閾値"), 0.0, value=1.0,
+                                                    key="atac_dar_lfc_threshold", on_change=reset_atac_results))
+    if st.button(ui("Validate DAR table", lang, "DAR表を検証"), key="atac_validate_dar"):
+        try:
+            result = brim_atac.read_dar_table(uploaded_file, separator, padj_threshold, lfc_threshold,
+                                               coordinate_system, column_map or None)
+            st.session_state["atac_input_df"] = result
+            st.session_state["atac_validated_df"] = result
+            st.session_state["atac_results"] = result
+            st.session_state["atac_validation_report"] = {"source_mode": "dar_table", "column_map": column_map,
+                                                            "transforms": result.attrs.get("transforms", [])}
+            reset_peak_mapping_results()
+            st.success(ui("DAR table validated.", lang, "DAR表を検証しました。"))
+        except brim_atac.ATACError as error:
+            st.error(str(error))
+
+
+def render_atac_ui(lang):
+    """Render the Phase 2 ATAC-only UI using the Streamlit-free core module."""
+    st.header(ui("ATAC-seq analysis", lang, "ATAC-seq解析"))
+    st.caption(ui("Analyze ATAC-seq independently. RNA–ATAC integration is introduced in a later phase.", lang,
+                  "ATAC-seqを単独解析します。RNA–ATAC統合は後続Phaseで追加されます。"))
+    mode = st.radio(
+        ui("ATAC input mode", lang, "ATAC入力モード"), ["count_matrix", "dar_table"], horizontal=True,
+        format_func=lambda value: ui("Peak count matrix", lang, "peak count matrix")
+        if value == "count_matrix" else ui("Analyzed DAR table", lang, "解析済みDAR表"),
+        key="atac_input_mode", on_change=reset_atac_input,
+    )
+    separator_label = st.selectbox(ui("File delimiter", lang, "区切り文字"), ["CSV", "TSV"], key="atac_separator",
+                                    on_change=reset_atac_input)
+    uploaded_file = st.file_uploader(ui("ATAC input file", lang, "ATAC入力ファイル"), type=["csv", "tsv", "txt"],
+                                     key=f"atac_{mode}_file")
+    signature = _atac_uploaded_signature(uploaded_file, mode)
+    if signature != st.session_state.get("atac_uploaded_file_signature"):
+        reset_atac_input()
+        st.session_state["atac_uploaded_file_signature"] = signature
+    if uploaded_file is None:
+        st.info(ui("Upload a peak count matrix or an analyzed DAR table to begin.", lang,
+                   "開始するにはpeak count matrixまたは解析済みDAR表をアップロードしてください。"))
+        return
+    separator = _atac_separator(separator_label)
+    if mode == "count_matrix":
+        _render_atac_count_matrix_controls(uploaded_file, separator, lang)
+    else:
+        _render_atac_dar_table_controls(uploaded_file, separator, lang)
+    _render_atac_annotation_controls(lang)
+    _render_atac_results(lang)
+
+
+tab_upload, tab_deg, tab_multiomics, tab_viz, tab_network, tab_meta, tab_export, tab_info = st.tabs([
+    ui("Upload", lang), ui("DEG", lang), ui("Multi-omics", lang, "マルチオミクス"),
+    ui("Visualization", lang), ui("Network", lang), ui("🔬 Meta", lang), ui("Export", lang), ui("Info", lang)
 ])
 
 # TAB 1: UPLOAD
@@ -2087,6 +2434,10 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
             st.success("✅ " + (ui("Data ready! Please go to the 'DEG' tab to run analysis.", lang, 'データ準備完了！上の『DEG』タブに移動して解析を実行してください。')))
 
 # TAB 2: DEG
+with tab_multiomics:
+    render_atac_ui(lang)
+
+
 with tab_deg:
     _is_jp = st.session_state.get("lang_display", "日本語") == "日本語"
     if st.session_state["counts_df"] is None:

@@ -81,3 +81,4 @@ def test_app_starts_and_renders_existing_primary_tabs() -> None:
         "Info",
     ):
         assert any(expected_section in label for label in labels)
+    assert any("Multi-omics" in label or "マルチオミクス" in label for label in labels)
