@@ -31,6 +31,26 @@ During implementation:
 - Do not perform unrelated refactoring.
 - Do not add dependencies without a clear need.
 
+## Phase transition audit gate
+
+Before beginning a new implementation phase, obtain two independent,
+read-only audit decisions:
+
+- **Auditor A — design and scientific integrity:** verifies PLAN, design
+  documents, architecture, phase boundaries, and project-specific invariants.
+- **Auditor B — implementation and verification evidence:** verifies the
+  corresponding code, tests, exports/provenance, Git history, and CI evidence.
+
+Each auditor must issue one of: **GO**, **CONDITIONAL NO-GO**, or **NO-GO**,
+with evidence and OPEN QUESTIONS. A new phase may begin only when both
+auditors issue **GO**. If either auditor does not issue **GO**, their decision
+governs the gate; do not override it or begin the phase unless the user gives
+explicit authorization after reviewing the reported condition or objection.
+
+Auditors do not edit implementation, tests, plans, or configuration while
+auditing. Their reports are evidence for the phase-transition decision, not
+implementation instructions.
+
 ## Coding
 
 - Prefer readable code over compact code.
