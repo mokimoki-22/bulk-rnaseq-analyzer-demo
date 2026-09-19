@@ -14,3 +14,14 @@ venv/
 
 # Streamlit's local configuration and runtime state
 .streamlit/secrets.toml
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+token*.json
