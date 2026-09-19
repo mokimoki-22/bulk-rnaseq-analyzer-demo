@@ -10,18 +10,18 @@
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
 - **Current phase:** Phase 1 — ATAC core
-- **Status:** 実装完了、監査修正待ち（監査判定: FAIL）
-- **Last synchronized commit:** `aeb5e93` — `.gitignore`のローカル秘密情報・認証情報の除外を追加
+- **Status:** 監査修正完了、再監査待ち
+- **Last synchronized commit:** `993a691` — 開発再開・PC切替手順を文書化
 - **Last verified CI:** CI #3、`f06b376`、Ubuntu/Windows × Python 3.11/3.12の
   4環境すべて成功、88 passed。`aeb5e93`は`.gitignore`のみの同期用変更である。
-- **Next task:** Phase 1監査で見つかった以下の項目だけを修正する。
-  1. 1-based closedの単一塩基peak（例: `chr1:1-1`）を、0-based half-openの
-     `[0, 1)`へ正しく変換する。
-  2. 座標系変換のtransform logを`read_dar_table()`の返却値と`run_dar()`の結果に保持し、
-     Phase 2のprovenance記録へ渡せるようにする。
-  3. promoterの両strand境界、複数peak→同一gene、3正規化方式について回帰テストを追加する。
-  4. 設計書§13の参照ファイル形式を、実装どおり`.tsv.gz`へ修正する。
-- **Do not start:** 上記監査修正と再監査が完了するまで、Phase 2には着手しない。
+- **Completed remediation:** 1-based closedの単一塩基peak変換、座標transform logの
+  `read_dar_table()`および`run_dar()`への伝播、promoter境界・複数peak→同一gene・
+  3正規化方式の回帰テスト、設計書§13の`.tsv.gz`表記への修正。
+- **Verification:** Python 3.12で全95テスト成功。実DESeq2の小規模synthetic inputに由来する
+  dispersion trend fallback警告6件あり。
+- **Next task:** Phase 1の再監査を行い、Acceptance criteria、I-2.1、I-2.2、I-2.3、
+  I-3.1、I-3.2、I-4.2への適合を確認する。
+- **Do not start:** 再監査でPhase 1の完了を確認するまで、Phase 2には着手しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
@@ -137,7 +137,7 @@ ATAC追加前のbaseline testが再現可能。
 
 ## Phase 1: ATAC core
 
-**状態:** 実装完了・監査修正待ち（監査判定: FAIL、2026-09-11）
+**状態:** 監査修正完了・再監査待ち（2026-09-19）
 **設計書参照:** §7.1–7.3, §8.1–8.2, §9, §14.1
 
 **実装着手条件**

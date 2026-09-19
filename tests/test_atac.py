@@ -102,6 +102,20 @@ def test_one_based_count_coordinates_are_explicitly_converted_and_logged():
         )
 
 
+def test_one_based_closed_single_base_peak_is_accepted_and_standardized():
+    raw = "chrom,start,end,s1\nchr1,1,1,4\n"
+    result = brim_atac.read_peak_count_matrix(io.StringIO(raw), ",", "columns", "1-based")
+    assert result.loc[0, ["start", "end", "peak_id"]].tolist() == [0, 1, "chr1:0-1"]
+    assert result.attrs["transforms"] == [{
+        "name": "one_based_closed_to_zero_based_half_open",
+        "applied": True,
+        "affected_rows": 1,
+        "total_rows": 1,
+        "success_rate": 1.0,
+        "details": {"source": "1-based closed", "target": "0-based half-open"},
+    }]
+
+
 @pytest.mark.parametrize(
     "text,message",
     [
@@ -171,6 +185,13 @@ def test_read_dar_aliases_and_sample_dar_table():
     assert sample["padj_is_na"].sum() == 1
 
 
+def test_one_based_dar_table_retains_conversion_log():
+    raw = "chrom,start,end,log2FoldChange,padj\nchr1,1,1,1.5,0.01\n"
+    result = brim_atac.read_dar_table(io.StringIO(raw), ",", 0.05, 1.0, "1-based")
+    assert result.loc[0, ["start", "end", "peak_id"]].tolist() == [0, 1, "chr1:0-1"]
+    assert result.attrs["transforms"][0]["name"] == "one_based_closed_to_zero_based_half_open"
+
+
 def test_run_dar_retains_engine_na_flags_and_prefilter_provenance(monkeypatch):
     counts, metadata = _counts_and_metadata(2)
     raw = pd.DataFrame({
@@ -202,6 +223,28 @@ def test_run_dar_retains_engine_na_flags_and_prefilter_provenance(monkeypatch):
         "0-based", 0.05, 1.0,
     ).data
     assert result.columns.tolist() == dar_mode.columns.tolist()
+
+
+def test_run_dar_propagates_input_coordinate_transforms(monkeypatch):
+    raw_counts = (
+        "chrom,start,end,control_0,control_1,control_2,treated_0,treated_1,treated_2\n"
+        "chr1,1,1,20,21,22,30,31,32\n"
+        "chr1,301,400,40,41,42,50,51,52\n"
+    )
+    counts = brim_atac.read_peak_count_matrix(io.StringIO(raw_counts), ",", "columns", "1-based")
+    metadata = pd.DataFrame(
+        {"condition": ["control"] * 3 + ["treated"] * 3},
+        index=["control_0", "control_1", "control_2", "treated_0", "treated_1", "treated_2"],
+    )
+    engine_results = pd.DataFrame({
+        "baseMean": [30.0, 40.0], "log2FoldChange": [0.2, -0.3],
+        "pvalue": [0.8, 0.7], "padj": [0.9, 0.9], "stat": [0.1, -0.1],
+    }, index=counts["peak_id"])
+    _install_fake_deseq(monkeypatch, engine_results)
+    result = brim_atac.run_dar(
+        counts, metadata, "control", "treated", "deseq2_median_of_ratios", 1, 0.05, 1.0,
+    )
+    assert result.attrs["transforms"] == counts.attrs["transforms"]
 
 
 def test_run_dar_distinguishes_all_engine_na_combinations(monkeypatch):
@@ -309,6 +352,46 @@ def test_real_run_dar_estimates_results_and_retains_all_zero_na(normalization):
     assert result.set_index("peak_id").loc[changed_ids, "log2FoldChange"].median() > 0.5
 
 
+def test_real_normalization_choices_produce_distinct_factors_and_results():
+    rng = np.random.default_rng(20260919)
+    samples = [f"s{i}" for i in range(6)]
+    values = rng.negative_binomial(20, 20 / (20 + 80), size=(120, 6))
+    values[:15, 3:] *= 12
+    counts = pd.DataFrame(values, columns=samples)
+    counts.insert(0, "end", np.arange(len(counts)) * 200 + 150)
+    counts.insert(0, "start", np.arange(len(counts)) * 200 + 100)
+    counts.insert(0, "chrom", "chr1")
+    counts.insert(0, "peak_id", counts["chrom"] + ":" + counts["start"].astype(str) + "-" + counts["end"].astype(str))
+    metadata = pd.DataFrame({"condition": ["control"] * 3 + ["treated"] * 3}, index=samples)
+    supplied = dict(zip(samples, [0.5, 0.8, 1.0, 1.5, 2.0, 3.0]))
+    results = {
+        "deseq2_median_of_ratios": brim_atac.run_dar(
+            counts, metadata, "control", "treated", "deseq2_median_of_ratios", 1, 0.05, 1.0,
+        ),
+        "total_reads_in_peaks": brim_atac.run_dar(
+            counts, metadata, "control", "treated", "total_reads_in_peaks", 1, 0.05, 1.0,
+        ),
+        "user_supplied_size_factors": brim_atac.run_dar(
+            counts, metadata, "control", "treated", "user_supplied_size_factors", 1, 0.05, 1.0,
+            size_factors=supplied,
+        ),
+    }
+    factor_vectors = {
+        method: np.array([result.attrs["size_factors"][sample] for sample in samples])
+        for method, result in results.items()
+    }
+    assert not np.allclose(factor_vectors["deseq2_median_of_ratios"], factor_vectors["total_reads_in_peaks"])
+    assert not np.allclose(factor_vectors["deseq2_median_of_ratios"], factor_vectors["user_supplied_size_factors"])
+    assert not np.allclose(factor_vectors["total_reads_in_peaks"], factor_vectors["user_supplied_size_factors"])
+    lfc_vectors = {
+        method: result.set_index("peak_id").loc[counts["peak_id"], "log2FoldChange"].to_numpy()
+        for method, result in results.items()
+    }
+    assert not np.allclose(lfc_vectors["deseq2_median_of_ratios"], lfc_vectors["total_reads_in_peaks"])
+    assert not np.allclose(lfc_vectors["deseq2_median_of_ratios"], lfc_vectors["user_supplied_size_factors"])
+    assert not np.allclose(lfc_vectors["total_reads_in_peaks"], lfc_vectors["user_supplied_size_factors"])
+
+
 def _genes() -> pd.DataFrame:
     return pd.DataFrame({
         "chrom": ["chr1", "chr1", "chr1", "chr1"],
@@ -331,6 +414,31 @@ def test_promoter_mapping_is_strand_aware_and_preserves_one_to_many_edges():
     assert ("minus", "g_minus") in pairs
     assert {gene for peak, gene in pairs if peak == "both"} == {"g_tie_1", "g_tie_2"}
     assert edges["reference_release"].eq("48").all()
+
+
+def test_promoter_mapping_includes_exact_boundaries_for_both_strands():
+    peaks = pd.DataFrame({
+        "peak_id": ["plus_left", "plus_right", "plus_before", "plus_after",
+                    "minus_left", "minus_right", "minus_before", "minus_after"],
+        "chrom": ["chr1"] * 8,
+        "start": [800, 1050, 799, 1051, 1950, 2200, 1949, 2201],
+        "end": [801, 1051, 800, 1052, 1951, 2201, 1950, 2202],
+    })
+    edges = brim_atac.map_peaks_to_promoters(peaks, _genes(), upstream=200, downstream=50)
+    pairs = set(zip(edges["peak_id"], edges["gene_id"]))
+    assert pairs == {
+        ("plus_left", "g_plus"), ("plus_right", "g_plus"),
+        ("minus_left", "g_minus"), ("minus_right", "g_minus"),
+    }
+
+
+def test_promoter_mapping_retains_multiple_peaks_for_one_gene():
+    peaks = pd.DataFrame({
+        "peak_id": ["first", "second"], "chrom": ["chr1", "chr1"],
+        "start": [900, 1040], "end": [910, 1050],
+    })
+    edges = brim_atac.map_peaks_to_promoters(peaks, _genes(), upstream=200, downstream=50)
+    assert set(edges.loc[edges["gene_id"] == "g_plus", "peak_id"]) == {"first", "second"}
 
 
 def test_nearest_tss_retains_all_ties_and_respects_maximum_distance():

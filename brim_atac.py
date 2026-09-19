@@ -121,8 +121,16 @@ def _read_frame(file_obj: BinaryIO | TextIO | bytes | str, sep: str) -> pd.DataF
     return pd.read_csv(file_obj, sep=sep)
 
 
-def parse_peak_coordinates(index_or_columns: pd.Index | pd.Series | pd.DataFrame | Sequence[str]) -> pd.DataFrame:
-    """Parse index-style peaks or validate explicit chrom/start/end columns."""
+def parse_peak_coordinates(index_or_columns: pd.Index | pd.Series | pd.DataFrame | Sequence[str],
+                           coordinate_system: str = "0-based") -> pd.DataFrame:
+    """Parse peak coordinates using the declared coordinate-system rules.
+
+    Returned coordinates remain in the declared system. Callers that accept
+    1-based closed input convert it to BRIM's 0-based half-open standard only
+    after this validation succeeds.
+    """
+    if coordinate_system not in {"0-based", "1-based"}:
+        raise CoordinateSystemError("coordinate_system must be '0-based' or '1-based'.")
     if isinstance(index_or_columns, pd.DataFrame):
         missing = {"chrom", "start", "end"}.difference(index_or_columns.columns)
         if missing:
@@ -143,8 +151,13 @@ def parse_peak_coordinates(index_or_columns: pd.Index | pd.Series | pd.DataFrame
                 or not np.equal(numeric, np.floor(numeric)).all()):
             raise CoordinateSystemError(f"{column} must contain integers.")
         result[column] = numeric.astype(np.int64)
-    if (result["chrom"] == "").any() or (result["start"] < 0).any() or (result["end"] <= result["start"]).any():
-        raise CoordinateSystemError("Coordinates require non-empty chrom, start >= 0, and end > start.")
+    if (result["chrom"] == "").any():
+        raise CoordinateSystemError("Coordinates require non-empty chrom.")
+    if coordinate_system == "0-based":
+        if (result["start"] < 0).any() or (result["end"] <= result["start"]).any():
+            raise CoordinateSystemError("Coordinates require start >= 0 and end > start.")
+    elif (result["start"] < 1).any() or (result["end"] < result["start"]).any():
+        raise CoordinateSystemError("1-based closed coordinates require start >= 1 and end >= start.")
     result["peak_id"] = result["chrom"] + ":" + result["start"].astype(str) + "-" + result["end"].astype(str)
     return result.reset_index(drop=True)
 
@@ -152,23 +165,25 @@ def parse_peak_coordinates(index_or_columns: pd.Index | pd.Series | pd.DataFrame
 def read_peak_count_matrix(file_obj: BinaryIO | TextIO | bytes | str, sep: str,
                            coordinate_column_mode: str, coordinate_system: str) -> pd.DataFrame:
     """Read and validate an integer peak-by-sample count matrix."""
+    if coordinate_system not in {"0-based", "1-based"}:
+        raise CoordinateSystemError("coordinate_system must be '0-based' or '1-based'.")
     raw = _read_frame(file_obj, sep)
     if coordinate_column_mode == "index":
         if raw.shape[1] < 2:
             raise PeakCountMatrixError("Index mode requires a coordinate column and samples.")
-        coordinates = parse_peak_coordinates(raw.iloc[:, 0].astype(str))
+        coordinates = parse_peak_coordinates(raw.iloc[:, 0].astype(str), coordinate_system)
         values = raw.iloc[:, 1:].copy()
     elif coordinate_column_mode == "columns":
         lowered = {str(column).strip().lower(): column for column in raw.columns}
         if not all(name in lowered for name in ("chrom", "start", "end")):
             raise PeakCountMatrixError("Column mode requires chrom, start, and end.")
         source_columns = [lowered[name] for name in ("chrom", "start", "end")]
-        coordinates = parse_peak_coordinates(raw[source_columns].set_axis(["chrom", "start", "end"], axis=1))
+        coordinates = parse_peak_coordinates(
+            raw[source_columns].set_axis(["chrom", "start", "end"], axis=1), coordinate_system,
+        )
         values = raw.drop(columns=source_columns)
     else:
         raise PeakCountMatrixError("coordinate_column_mode must be 'index' or 'columns'.")
-    if coordinate_system not in {"0-based", "1-based"}:
-        raise CoordinateSystemError("coordinate_system must be '0-based' or '1-based'.")
     transforms: list[dict[str, Any]] = []
     if coordinate_system == "1-based":
         coordinates["start"] -= 1
@@ -366,6 +381,7 @@ def run_dar(counts_df: pd.DataFrame, metadata: pd.DataFrame, ref_condition: str,
                                   "input_peaks": len(values), "excluded_peaks": int((~keep).sum()),
                                   "analyzed_peaks": len(filtered)}
     result.attrs["samples_by_condition"] = {str(key): int(value) for key, value in group_counts.items()}
+    result.attrs["transforms"] = list(counts_df.attrs.get("transforms", ()))
     return result
 
 
@@ -448,11 +464,9 @@ def validate_dar_table(df: pd.DataFrame, coordinate_system: str,
         return ValidationResult(False, errors=("peak_id must be non-empty and non-missing.",))
     if result["peak_id"].duplicated().any():
         return ValidationResult(False, errors=("Duplicate peak_id values are not allowed.",))
-    return ValidationResult(
-        True,
-        _standard_dar(result, "dar_table", padj_threshold, lfc_threshold),
-        transforms=tuple(transforms),
-    )
+    standardized = _standard_dar(result, "dar_table", padj_threshold, lfc_threshold)
+    standardized.attrs["transforms"] = list(transforms)
+    return ValidationResult(True, standardized, transforms=tuple(transforms))
 
 
 def standardize_chromosomes(df: pd.DataFrame, build: str) -> tuple[pd.DataFrame, TransformLog]:

@@ -903,8 +903,8 @@ brim-app/
 ├─ references/
 │  ├─ *.csv                      # 既存の自動走査対象
 │  └─ genome_annotations/
-│     ├─ hg38_genes.parquet
-│     ├─ mm10_genes.parquet
+│     ├─ hg38_genes.tsv.gz
+│     ├─ mm10_genes.tsv.gz
 │     └─ manifest.json
 ├─ sample_data/
 │  └─ multiomics/
