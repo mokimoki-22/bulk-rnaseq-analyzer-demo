@@ -27,7 +27,7 @@ def clear_service_caches():
 
 
 def test_string_notice_precedes_explicit_action_and_manifest_records_cached_use(monkeypatch):
-    image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=")
+    image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==")
     post = Mock(return_value=SimpleNamespace(status_code=200, content=image))
     monkeypatch.setattr(requests, "post", post)
     app = result_app(flagged_results())

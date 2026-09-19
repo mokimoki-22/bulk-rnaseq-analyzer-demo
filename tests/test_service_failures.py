@@ -84,10 +84,16 @@ def test_partial_mapping_and_failed_later_chunk_keep_all_attempts(monkeypatch):
     assert post.call_count == 2
 
 
-@pytest.mark.parametrize("failure", ["timeout", "http"])
+@pytest.mark.parametrize("failure", ["timeout", "http", "empty_image", "invalid_image"])
 def test_string_failure_remains_in_export_history_not_successful_services(monkeypatch, failure):
-    post = Mock(side_effect=requests.Timeout()) if failure == "timeout" else Mock(
-        return_value=SimpleNamespace(status_code=503, content=b"unavailable"))
+    if failure == "timeout":
+        post = Mock(side_effect=requests.Timeout())
+    elif failure == "http":
+        post = Mock(return_value=SimpleNamespace(status_code=503, content=b"unavailable"))
+    elif failure == "empty_image":
+        post = Mock(return_value=SimpleNamespace(status_code=200, content=b""))
+    else:
+        post = Mock(return_value=SimpleNamespace(status_code=200, content=b"\x89PNG\r\n\x1a\nnot-valid"))
     monkeypatch.setattr(requests, "post", post)
     app = result_app(flagged_results())
     with capture_downloads() as downloads:
@@ -101,7 +107,9 @@ def test_string_failure_remains_in_export_history_not_successful_services(monkey
     assert services["external_services_used"] == []
     assert services["events"][0]["lookup_outcome"] == "failed"
     assert services["external_service_events"] == services["events"]
-    assert services["external_service_events"][0]["requests"][0]["outcome"] == "failed"
+    assert services["external_service_events"][0]["requests"][0]["outcome"] == (
+        "success" if failure in {"empty_image", "invalid_image"} else "failed"
+    )
 
 
 @pytest.mark.parametrize("case", ["invalid_count", "timeout", "http", "partial", "malformed"])

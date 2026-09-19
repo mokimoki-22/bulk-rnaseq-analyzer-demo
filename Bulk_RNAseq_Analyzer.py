@@ -9,6 +9,7 @@ import time
 import platform
 import zipfile
 import json
+import zlib
 from contextlib import contextmanager
 from dataclasses import asdict
 import brim_atac
@@ -435,6 +436,52 @@ def get_string_network_img(gene_list, species_id, limit=30, flavor="confidence",
         event = external_service_record("string-db.org", "gene list")
     return service_lookup(event, _cached_string_network_img, gene_list, species_id, limit, flavor)
 
+
+def _is_valid_string_network_image(content):
+    """Return whether a STRING response contains a structurally valid PNG.
+
+    The STRING image endpoint is expected to return PNG data.  Checking the
+    PNG chunk structure keeps a successful HTTP request distinct from a usable
+    network image without adding an image-processing dependency.
+    """
+    if not isinstance(content, (bytes, bytearray)):
+        return False
+    data = bytes(content)
+    signature = b"\x89PNG\r\n\x1a\n"
+    if not data.startswith(signature):
+        return False
+
+    offset = len(signature)
+    saw_ihdr = False
+    saw_idat = False
+    while offset < len(data):
+        if len(data) - offset < 12:
+            return False
+        chunk_length = int.from_bytes(data[offset:offset + 4], "big")
+        chunk_type = data[offset + 4:offset + 8]
+        chunk_end = offset + 12 + chunk_length
+        if chunk_end > len(data):
+            return False
+        chunk_data = data[offset + 8:offset + 8 + chunk_length]
+        expected_crc = int.from_bytes(data[offset + 8 + chunk_length:chunk_end], "big")
+        if zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF != expected_crc:
+            return False
+        if not saw_ihdr:
+            if chunk_type != b"IHDR" or chunk_length != 13:
+                return False
+            width = int.from_bytes(chunk_data[:4], "big")
+            height = int.from_bytes(chunk_data[4:8], "big")
+            if width == 0 or height == 0:
+                return False
+            saw_ihdr = True
+        if chunk_type == b"IDAT":
+            saw_idat = True
+        if chunk_type == b"IEND":
+            return saw_ihdr and saw_idat and chunk_length == 0 and chunk_end == len(data)
+        offset = chunk_end
+    return False
+
+
 @st.cache_data(show_spinner=False, ttl=300)
 def _cached_string_network_img(gene_list, species_id, limit, flavor, _event):
     url = "https://string-db.org/api/image/network"
@@ -446,7 +493,9 @@ def _cached_string_network_img(gene_list, species_id, limit, flavor, _event):
     }
     try:
         res, _ = service_post(_event, url, params)
-        return (res.content, "success") if res.status_code == 200 else (None, "failed")
+        if res.status_code != 200 or not _is_valid_string_network_image(res.content):
+            return None, "failed"
+        return res.content, "success"
     except requests.RequestException:
         return None, "failed"
 
@@ -3371,6 +3420,8 @@ Identifies genes whose response to treatment is modulated by another variable (e
                                     )
                                     _stat_ia.summary()
                                     _res_coef = _stat_ia.results_df.copy()
+                                    _res_coef["padj_is_na"] = _res_coef["padj"].isna()
+                                    _res_coef["lfc_is_na"] = _res_coef["log2FoldChange"].isna()
                                     _res_coef["padj"] = _res_coef["padj"].fillna(1.0)
                                     _res_coef["log2FoldChange"] = _res_coef["log2FoldChange"].fillna(0.0)
                                     _ia_results_dict[_coef] = _res_coef
