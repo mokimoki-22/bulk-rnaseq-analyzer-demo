@@ -2,7 +2,26 @@
 
 - 対応設計書: `docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
 - 現在Phase: **Phase 1**
-- 最終更新: 2026-09-06
+- 最終更新: 2026-09-19
+
+## Current development status
+
+この節を、PCやCodexを切り替えて作業を再開するときの唯一の現在地とする。
+実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
+
+- **Current phase:** Phase 1 — ATAC core
+- **Status:** 実装完了、監査修正待ち（監査判定: FAIL）
+- **Last synchronized commit:** `aeb5e93` — `.gitignore`のローカル秘密情報・認証情報の除外を追加
+- **Last verified CI:** CI #3、`f06b376`、Ubuntu/Windows × Python 3.11/3.12の
+  4環境すべて成功、88 passed。`aeb5e93`は`.gitignore`のみの同期用変更である。
+- **Next task:** Phase 1監査で見つかった以下の項目だけを修正する。
+  1. 1-based closedの単一塩基peak（例: `chr1:1-1`）を、0-based half-openの
+     `[0, 1)`へ正しく変換する。
+  2. 座標系変換のtransform logを`read_dar_table()`の返却値と`run_dar()`の結果に保持し、
+     Phase 2のprovenance記録へ渡せるようにする。
+  3. promoterの両strand境界、複数peak→同一gene、3正規化方式について回帰テストを追加する。
+  4. 設計書§13の参照ファイル形式を、実装どおり`.tsv.gz`へ修正する。
+- **Do not start:** 上記監査修正と再監査が完了するまで、Phase 2には着手しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
@@ -118,7 +137,7 @@ ATAC追加前のbaseline testが再現可能。
 
 ## Phase 1: ATAC core
 
-**状態:** 実装完了・監査待ち（2026-09-06）
+**状態:** 実装完了・監査修正待ち（監査判定: FAIL、2026-09-11）
 **設計書参照:** §7.1–7.3, §8.1–8.2, §9, §14.1
 
 **実装着手条件**
