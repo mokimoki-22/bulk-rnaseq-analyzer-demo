@@ -20,6 +20,8 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from brim_tf_integration import fold_symbol
+
 
 class MotifImportError(ValueError):
     """Raised when peak sets or a motif result cannot be built or imported with the given inputs."""
@@ -562,3 +564,478 @@ def read_motif_results(data: bytes, file_name: str, tool: str, column_map: Mappi
                                     "p-values are shown.",
                          "message_ja": "調整済みp値がありません。BRIMはp値を補正しないため、報告されたp値のみを表示します。"})
     return MotifTable(rows=rows.drop(columns=[] if peak_set_index is not None else ["peak_set"]), record=record, warnings=warnings)
+
+# --------------------------------------------------------------------------------------------------
+# TF symbol normalization, binding an import to a peak set, and the Level 2 join (plan D2, D5-D9, D12, D13).
+# --------------------------------------------------------------------------------------------------
+
+REPRESENTATIVE_MOTIF_RULE = "smallest_reported_padj_then_pvalue_then_motif_name"
+SYMBOL_RULE_TEXT = (
+    "TF symbols are read from the motif name: the text before the first '(' or '/', split at ':' for heterodimers; "
+    "they are matched to gene symbols ignoring case and surrounding spaces. Aliases, old symbols and families are not "
+    "resolved and are listed as unmatched."
+)
+SYMBOL_RULE_TEXT_JA = (
+    "TFシンボルはmotif名から読み取ります（最初の「(」または「/」の前まで。ヘテロダイマーは「:」で分割）。"
+    "遺伝子シンボルとは大文字小文字と前後の空白を無視して照合します。別名・旧シンボル・ファミリーは解決せず、"
+    "未照合として一覧に出します。"
+)
+N_AXES_NOTE = ("The number of supported axes is a sorting aid, not a statistic, and it counts the three Level 2 axes only; "
+               "the motif result is a separate column.")
+N_AXES_NOTE_JA = "支持軸数は並べ替えの補助で統計量ではありません。レベル2の3軸のみを数え、motif結果は別の列です。"
+INDEPENDENCE_NOTE = ("The motif axis and the CollecTRI-based target enrichment may be less independent than they appear, "
+                     "because curated regulatory databases partly rest on experiments near promoters.")
+LIMITATIONS_EN = (
+    "Motif results are imported from an external tool that BRIM did not run and cannot verify; BRIM records the "
+    "conditions you entered.",
+    "A motif match shows that a binding sequence is present in the peaks; it does not show that the TF binds there.",
+    "The motif p-value and padj are a separate test computed by the external tool from ATAC peaks and a background; they "
+    "are independent of RNA, ATAC and Level 2 padj, and BRIM does not correct, recompute or combine them.",
+    "Opening and closing peak sets are analyzed separately and are not paired with Level 2 gene sets automatically.",
+    INDEPENDENCE_NOTE,
+    "Motif names that could not be matched to a gene symbol (families, aliases, complexes) are listed and not used; a TF "
+    "that is not in the result is \"not in result\", not \"not enriched\".",
+    "When one TF has several motifs, BRIM shows the motif with the smallest reported padj; all rows are kept in the "
+    "export, and choosing the best of several is not corrected.",
+    "Candidates are hypotheses; they do not show a functional effect of the TF on genes or on a phenotype. The "
+    "supported-axis count is a sorting aid, not a statistic, and it does not include the motif axis.",
+)
+LIMITATIONS_JA = (
+    "motif結果は、BRIMが実行も検証もしていない外部ツールの出力です。BRIMは、入力された条件を記録します。",
+    "motifの一致は、peak内に結合配列があることを示すもので、TFがそこに結合することを示すものではありません。",
+    "motifのp値とpadjは、外部ツールがATAC peakと背景から計算した別の検定です。RNA・ATAC・レベル2のpadjとは独立で、"
+    "BRIMは補正・再計算・結合をしません。",
+    "openingとclosingのpeak集合は別々に解析され、レベル2の遺伝子集合とは自動では対応付けません。",
+    "motif軸とCollecTRI由来の標的濃縮は、見かけほど独立でない可能性があります（キュレーションDBの一部が"
+    "プロモーター付近の実験に基づくため）。",
+    "遺伝子シンボルに照合できなかったmotif名（ファミリー、別名、複合体）は一覧に出すだけで使用しません。結果に無いTFは"
+    "「結果に無い」であり、「濃縮なし」ではありません。",
+    "1つのTFに複数のmotifがある場合、報告padjが最小のmotifを表示します。全行は出力に残り、複数からの最良の選択は補正されていません。",
+    "候補は仮説であり、TFが遺伝子や表現型に機能的な影響を与えることを示すものではありません。支持軸数は並べ替えの補助で"
+    "統計量ではなく、motif軸を含みません。",
+)
+CAUSAL_PATTERNS = (r"\b(regulates?|drives?|driven|causes?|caused|causing)\b", r"制御する|引き起こ|原因")
+_PLACEHOLDER_COLUMNS = ("motif_enrichment_padj", "motif_enrichment_score", "motif_status", "motif_source")
+STATUS_NOT_RUN, STATUS_NOT_IMPORTED, STATUS_NOT_IN_RESULT = "not_run", "not_imported", "not_in_result"
+STATUS_NO_PADJ, STATUS_LE, STATUS_GT = "no_padj_reported", "reported_padj_le_alpha", "reported_padj_gt_alpha"
+BACKGROUND_CHOICES = ("brim_all_tested_peaks", "tool_default", "other")
+ANALYSIS_SOURCES = ("brim_generated", "other_file")
+MANIFEST_UNMATCHED_LIMIT = 50
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert numpy/pandas scalars and NaN to plain JSON values (NaN -> null; JSON is written with allow_nan=False)."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        return None if not math.isfinite(float(value)) else float(value)
+    if value is pd.NA or value is None:
+        return None
+    return value
+
+
+def extract_tf_symbols(motif_name: str) -> list[str]:
+    """Return the TF symbol(s) named by a motif: the text before the first '(' or '/', split at ':' (heterodimers)."""
+    head = re.split(r"[(/]", str(motif_name), maxsplit=1)[0]
+    return [part.strip() for part in re.split(r":+", head) if part.strip()]
+
+
+def normalize_tf_symbols(motif_rows: pd.DataFrame, reference_symbols) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Map motif rows to reference gene symbols (one row per component, keeping heterodimers) and report the match.
+
+    The reference spelling is used for the TF (name order picks one when spellings differ only by case).  Nothing is
+    resolved beyond case and surrounding spaces.  If not a single row matches, the import stops with an actionable error.
+    """
+    by_fold: dict[str, list[str]] = {}
+    for symbol in sorted({str(s) for s in reference_symbols if str(s).strip()}):
+        by_fold.setdefault(fold_symbol(symbol), []).append(symbol)
+    records: list[dict[str, Any]] = []
+    statuses: list[str] = []
+    unmatched: list[dict[str, Any]] = []
+    for row in motif_rows.itertuples(index=False):
+        components = extract_tf_symbols(row.motif_name)
+        matched = [by_fold[fold_symbol(c)][0] if fold_symbol(c) in by_fold else None for c in components]
+        n_matched = sum(m is not None for m in matched)
+        status = "unmatched" if n_matched == 0 else ("matched" if n_matched == len(components) else "partially_matched")
+        statuses.append(status)
+        common = {"source_line": row.source_line, "motif_name": row.motif_name, "row_match_status": status,
+                  "pvalue": row.pvalue, "padj": row.padj, "pct_target": row.pct_target,
+                  "pct_background": row.pct_background, "enrichment_score": row.enrichment_score, "motif_id": row.motif_id}
+        if not components:
+            records.append({**common, "component": "", "tf_symbol": None, "motif_form": "single", "partner_components": "",
+                            "unmatched_reason": "no_symbol_extracted"})
+            unmatched.append({"motif_name": row.motif_name, "row_status": "unmatched", "unmatched_symbols": [],
+                              "reason": "no_symbol_extracted"})
+            continue
+        form = "heterodimer" if len(components) > 1 else "single"
+        for component, tf_symbol in zip(components, matched):
+            records.append({**common, "component": component, "tf_symbol": tf_symbol, "motif_form": form,
+                            "partner_components": ":".join(c for c in components if c != component),
+                            "unmatched_reason": "" if tf_symbol is not None else "not_in_reference"})
+        if status != "matched":
+            unmatched.append({"motif_name": row.motif_name, "row_status": status,
+                              "unmatched_symbols": [c for c, m in zip(components, matched) if m is None],
+                              "reason": "not_in_reference"})
+    n_rows = len(motif_rows)
+    report = {
+        "n_motif_rows": n_rows, "n_rows_matched": statuses.count("matched"),
+        "n_rows_partially_matched": statuses.count("partially_matched"), "n_rows_unmatched": statuses.count("unmatched"),
+        "match_rate": (n_rows - statuses.count("unmatched")) / n_rows if n_rows else 0.0,
+        "reference_size": sum(len(v) for v in by_fold.values()),
+        "n_casefold_collisions_reference": int(sum(len(v) > 1 for v in by_fold.values())),
+        "unmatched": unmatched, "rule_text": SYMBOL_RULE_TEXT, "rule_text_ja": SYMBOL_RULE_TEXT_JA,
+    }
+    if n_rows and report["n_rows_unmatched"] == n_rows:
+        raise MotifImportError("None of the motif names could be matched to a gene symbol. Check that the species and the "
+                               "gene identifier type (gene symbol) are correct. / どのmotif名も遺伝子シンボルに"
+                               "照合できませんでした。種と遺伝子識別子（遺伝子シンボル）が合っているか確認してください。")
+    columns = ["source_line", "motif_name", "component", "tf_symbol", "row_match_status", "motif_form", "partner_components",
+               "unmatched_reason", "pvalue", "padj", "pct_target", "pct_background", "enrichment_score", "motif_id"]
+    return pd.DataFrame(records, columns=columns), report
+
+
+def summarize_motif_by_tf(symbol_map: pd.DataFrame) -> pd.DataFrame:
+    """One row per TF: the representative motif (smallest reported padj, then pvalue, then name) and all-row counts."""
+    matched = symbol_map.loc[symbol_map["tf_symbol"].notna()]
+    rows: list[dict[str, Any]] = []
+    for tf_symbol, group in matched.groupby("tf_symbol", sort=True):
+        with_padj = group.loc[group["padj"].notna()]
+        pool = with_padj if not with_padj.empty else group
+        ordered = pool.assign(_p=pool["pvalue"].fillna(np.inf), _q=pool["padj"].fillna(np.inf)).sort_values(
+            ["_q", "_p", "motif_name"], kind="mergesort")
+        best = ordered.iloc[0]
+        rows.append({"tf_symbol": tf_symbol, "n_motifs_for_tf": int(len(group)),
+                     "representative_motif_rule": REPRESENTATIVE_MOTIF_RULE, "motif_name": best["motif_name"],
+                     "motif_id": best["motif_id"], "padj": best["padj"], "pvalue": best["pvalue"],
+                     "enrichment_score": best["enrichment_score"], "pct_target": best["pct_target"],
+                     "pct_background": best["pct_background"], "motif_form": best["motif_form"],
+                     "match_status": best["row_match_status"], "source_line": int(best["source_line"]),
+                     "status": STATUS_NO_PADJ if with_padj.empty else "reported"})
+    columns = ["tf_symbol", "n_motifs_for_tf", "representative_motif_rule", "motif_name", "motif_id", "padj", "pvalue",
+               "enrichment_score", "pct_target", "pct_background", "motif_form", "match_status", "source_line", "status"]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def compare_thresholds(declared: Mapping[str, Any] | None, current: Mapping[str, Any]) -> dict[str, Any]:
+    """Compare the thresholds the user says the external analysis used with the current ones (exact, no tolerance)."""
+    now = _validated_thresholds(current)
+    if declared is None:
+        return {"declared": None, "current": now, "matches": None, "differences": []}
+    then = _validated_thresholds(declared)
+    differences = [key for key in ("atac_padj", "atac_lfc")
+                   if not math.isclose(then[key], now[key], rel_tol=0.0, abs_tol=1e-12)]
+    return {"declared": then, "current": now, "matches": not differences, "differences": differences}
+
+
+def _warning(code: str, message: str, message_ja: str) -> dict[str, str]:
+    return {"code": code, "message": message, "message_ja": message_ja}
+
+
+def import_motif_result(table: MotifTable, peak_sets: PeakSets, peak_set: str, declaration: Mapping[str, Any],
+                        reference_symbols, imported_at: str) -> dict[str, Any]:
+    """Bind a read motif result to one peak set of the current BED preparation and normalize its TF symbols.
+
+    Requires the user's declarations: which peak set, whether BRIM's BED files were analyzed (else the thresholds used),
+    the background, and that the peak coordinates and the external tool's genome are the same build.  A threshold
+    mismatch is a warning (the import continues, recorded); a stale peak set is handled by the caller (blocked).
+    """
+    if peak_set not in PEAK_SETS:
+        raise MotifImportError("Choose the peak set (opening or closing) that this result was calculated from.")
+    if table.record.get("peak_set_in_file") not in (None, peak_set):
+        raise MotifImportError(f"The file's peak_set column says {table.record['peak_set_in_file']}, but {peak_set} was "
+                               "selected. Select the matching peak set or split the file.")
+    if not declaration.get("genome_attested"):
+        raise MotifImportError("Confirm that the peak coordinates and the external tool's genome are the same build "
+                               f"({peak_sets.genome_build}).")
+    source = declaration.get("analysis_source")
+    if source not in ANALYSIS_SOURCES:
+        raise MotifImportError("Say whether the result was calculated from the BED files BRIM wrote or from another file.")
+    n_peaks = peak_sets.counts[f"n_{peak_set}"]
+    if not n_peaks:
+        raise MotifImportError(f"The {peak_set} peak set is empty in the current BED preparation, so there is nothing to "
+                               "attach a result to.")
+    if source == "other_file":
+        if declaration.get("declared_thresholds") is None:
+            raise MotifImportError("Enter the ATAC padj and log2FC thresholds used for the other file (they are not prefilled).")
+        declared = declaration["declared_thresholds"]
+    else:
+        declared = peak_sets.thresholds
+    threshold_check = compare_thresholds(declared, peak_sets.thresholds)
+    background = declaration.get("background_choice", "brim_all_tested_peaks")
+    if background not in BACKGROUND_CHOICES:
+        raise MotifImportError("background_choice must be one of " + ", ".join(BACKGROUND_CHOICES) + ".")
+    if background == "other" and not str(declaration.get("background_description", "")).strip():
+        raise MotifImportError("Describe the background that was used.")
+    warnings: list[dict[str, str]] = [dict(w) for w in table.warnings]
+    if threshold_check["matches"] is False:
+        warnings.append(_warning(
+            "threshold_mismatch",
+            f"The thresholds you entered ({threshold_check['declared']}) differ from the current BRIM ATAC thresholds "
+            f"({threshold_check['current']}); the result was not calculated from the current peak set.",
+            "入力された閾値が現在のBRIMのATAC閾値と異なります。この結果は現在のpeak集合から計算されたものではありません。"))
+    background_differs = background != "brim_all_tested_peaks"
+    if background_differs:
+        warnings.append(_warning(
+            "background_differs_from_brim",
+            "This motif result was compared against a background other than BRIM's all-tested-peaks background; "
+            "interpret it as a separate result.",
+            "このmotif結果はBRIMの背景とは別の背景との比較なので、別の結果として解釈してください。"))
+    reported_target = table.record.get("n_target_sequences_reported")
+    if source == "brim_generated" and reported_target is not None and reported_target != n_peaks:
+        warnings.append(_warning(
+            "target_count_differs",
+            f"The tool reports {reported_target} target sequences but the {peak_set} BED file has {n_peaks} peaks "
+            "(the tool may drop or merge sequences).",
+            f"ツールは対象配列を{reported_target}件と報告していますが、{peak_set}のBEDは{n_peaks}件です"
+            "（ツールが配列を除外・統合した場合に差が出ることがあります）。"))
+    reported_background = table.record.get("n_background_sequences_reported")
+    if (source == "brim_generated" and background == "brim_all_tested_peaks" and reported_background is not None
+            and reported_background != peak_sets.counts["n_background"]):
+        warnings.append(_warning(
+            "background_count_differs",
+            f"The tool reports {reported_background} background sequences but BRIM's background has "
+            f"{peak_sets.counts['n_background']} peaks.",
+            f"ツールは背景配列を{reported_background}件と報告していますが、BRIMの背景は"
+            f"{peak_sets.counts['n_background']}件です。"))
+    symbol_map, unmatched = normalize_tf_symbols(table.rows, reference_symbols)
+    tf_table = summarize_motif_by_tf(symbol_map)
+    unmatched_names = [item["motif_name"] for item in unmatched["unmatched"]]
+    record = {
+        "peak_set": peak_set, "imported_at": imported_at,
+        "import_id": hashlib.sha256(f"{table.record['sha256']}|{peak_set}|{peak_sets.peakset_fingerprint}".encode()).hexdigest(),
+        "tool": table.record["tool"], "tool_version": str(declaration.get("tool_version") or "not provided"),
+        "motif_database": str(declaration.get("motif_database") or "not provided"),
+        "source_file": {key: table.record[key] for key in ("file_name", "sha256", "byte_size", "encoding", "delimiter")},
+        "column_map": dict(table.record["column_map"]), "analysis_source": source,
+        "declared_thresholds": threshold_check["declared"], "current_thresholds": threshold_check["current"],
+        "threshold_matches_current": threshold_check["matches"], "threshold_differences": threshold_check["differences"],
+        "background_choice": background, "background_description": str(declaration.get("background_description", "")).strip(),
+        "background_differs_from_brim": background_differs,
+        "genome_build": peak_sets.genome_build, "genome_attested": True, "species": peak_sets.species,
+        "peakset_fingerprint": peak_sets.peakset_fingerprint,
+        "n_peaks_in_peak_set": int(n_peaks), "n_background_peaks": int(peak_sets.counts["n_background"]),
+        "n_target_sequences_reported": reported_target, "n_background_sequences_reported": reported_background,
+        "counts": {"n_rows": table.record["n_rows"], "n_missing_padj": table.record["n_missing_padj"],
+                   "n_missing_pvalue": table.record["n_missing_pvalue"], "n_tfs": int(len(tf_table)),
+                   **{key: unmatched[key] for key in ("n_rows_matched", "n_rows_partially_matched", "n_rows_unmatched",
+                                                      "match_rate", "reference_size", "n_casefold_collisions_reference")}},
+        "unmatched_count": len(unmatched_names), "unmatched_first_names": unmatched_names[:MANIFEST_UNMATCHED_LIMIT],
+        "warnings": warnings,
+    }
+    return {"peak_set": peak_set, "record": _json_safe(record), "rows": table.rows, "symbol_map": symbol_map,
+            "tf_table": tf_table, "unmatched": unmatched}
+
+
+def empty_motif_state() -> dict[str, Any]:
+    """The initial value of ``integration_motif_results``: no import and no history."""
+    return {"imports": {}, "history": []}
+
+
+def with_import(state: Mapping[str, Any] | None, imported: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a new state where ``imported`` replaces that peak set's import and the history gains an entry."""
+    current = state or empty_motif_state()
+    imports = dict(current["imports"])
+    imports[imported["peak_set"]] = imported
+    record = imported["record"]
+    history = list(current["history"]) + [{
+        "import_id": record["import_id"], "peak_set": imported["peak_set"], "imported_at": record["imported_at"],
+        "tool": record["tool"], "file_sha256": record["source_file"]["sha256"],
+        "peakset_fingerprint": record["peakset_fingerprint"]}]
+    return {"imports": imports, "history": history}
+
+
+def keep_current_imports(state: Mapping[str, Any] | None, current_fingerprint: str) -> dict[str, Any] | None:
+    """Drop imports whose peak set no longer matches the current preparation (a stale import is never attached)."""
+    if not state:
+        return None
+    imports = {peak_set: item for peak_set, item in state["imports"].items()
+               if item["record"]["peakset_fingerprint"] == current_fingerprint}
+    if not imports and not state["history"]:
+        return None
+    return {"imports": imports, "history": list(state["history"])}
+
+
+def prepared_source_record(peak_sets: PeakSets, bundle: Mapping[str, str], generated_at: str,
+                           app_version: str) -> dict[str, Any]:
+    """The record of one BED preparation (stored as ``integration_motif_source``; BED bodies are regenerated, not stored)."""
+    return _json_safe({
+        "generated_at": generated_at, "app_version": app_version, "thresholds": peak_sets.thresholds,
+        "genome_build": peak_sets.genome_build, "species": peak_sets.species,
+        "coordinate_convention": COORDINATE_CONVENTION, "counts": peak_sets.counts, "bed_sha256": peak_sets.bed_sha256,
+        "peakset_fingerprint": peak_sets.peakset_fingerprint, "background_definition": BACKGROUND_DEFINITION,
+        "background_definition_ja": BACKGROUND_DEFINITION_JA, "threshold_source_note": THRESHOLD_SOURCE_NOTE,
+        "exported_files_sha256": bundle_sha256(bundle), "warnings": peak_sets.warnings,
+    })
+
+
+def _fold_column(tf_table: pd.DataFrame) -> pd.Series:
+    return tf_table["tf_symbol"].map(fold_symbol)
+
+
+def attach_motif_enrichment(tf_table: pd.DataFrame, imports: Mapping[str, Mapping[str, Any]] | None,
+                            peak_sets=PEAK_SETS, alpha: float = 0.05, source_prepared: bool = False) -> pd.DataFrame:
+    """A display copy of a Level 2 table with motif columns per peak set; the stored Level 2 table is never changed.
+
+    Rows and their order stay as in ``tf_table`` (a left join on the case-folded TF symbol).  The placeholder motif
+    columns are dropped so "not run" never sits beside a value.  ``alpha`` only labels the reported padj for display; it
+    counts nothing and filters nothing.  The supported-axis counts of the Level 2 table are not touched.
+    """
+    if not 0 <= float(alpha) <= 1:
+        raise MotifImportError("alpha must be within [0, 1].")
+    result = tf_table.drop(columns=[c for c in _PLACEHOLDER_COLUMNS if c in tf_table.columns]).copy()
+    folds = list(_fold_column(result))
+    imports = imports or {}
+    names = ("status", "padj", "score", "n_motifs", "motif_name", "source_tool", "match_status", "form",
+             "threshold_matches_current", "background_differs_from_brim")
+    for peak_set in peak_sets:
+        prefix = f"motif_{peak_set}_"
+        imported = imports.get(peak_set)
+        columns: dict[str, list[Any]] = {name: [None] * len(result) for name in names}
+        if imported is None:
+            columns["status"] = [STATUS_NOT_IMPORTED if source_prepared else STATUS_NOT_RUN] * len(result)
+        else:
+            by_fold = {fold_symbol(row.tf_symbol): row for row in imported["tf_table"].itertuples(index=False)}
+            record = imported["record"]
+            for position, fold in enumerate(folds):
+                row = by_fold.get(fold)
+                columns["threshold_matches_current"][position] = record["threshold_matches_current"]
+                columns["background_differs_from_brim"][position] = record["background_differs_from_brim"]
+                if row is None:
+                    columns["status"][position] = STATUS_NOT_IN_RESULT
+                    continue
+                columns["status"][position] = (STATUS_NO_PADJ if pd.isna(row.padj)
+                                               else STATUS_LE if row.padj <= float(alpha) else STATUS_GT)
+                columns["padj"][position] = row.padj
+                columns["score"][position] = row.enrichment_score
+                columns["n_motifs"][position] = row.n_motifs_for_tf
+                columns["motif_name"][position] = row.motif_name
+                columns["source_tool"][position] = record["tool"]
+                columns["match_status"][position] = row.match_status
+                columns["form"][position] = row.motif_form
+        for name in names:
+            result[prefix + name] = columns[name]
+        for name in ("padj", "score"):
+            result[prefix + name] = pd.to_numeric(result[prefix + name], errors="coerce")
+        result[prefix + "n_motifs"] = pd.array(result[prefix + "n_motifs"], dtype="Int64")
+        for name in ("threshold_matches_current", "background_differs_from_brim"):
+            result[prefix + name] = pd.array(result[prefix + name], dtype="boolean")
+    result.attrs = dict(tf_table.attrs)
+    return result
+
+
+def motif_only_tfs(tf_table: pd.DataFrame, imports: Mapping[str, Mapping[str, Any]] | None, peak_sets=PEAK_SETS,
+                   alpha: float = 0.05) -> pd.DataFrame:
+    """TFs present in an imported motif result but not in the Level 2 table (long format, one row per TF and peak set)."""
+    known = set(_fold_column(tf_table)) if len(tf_table) else set()
+    rows: list[dict[str, Any]] = []
+    for peak_set in peak_sets:
+        imported = (imports or {}).get(peak_set)
+        if imported is None:
+            continue
+        for row in imported["tf_table"].itertuples(index=False):
+            if fold_symbol(row.tf_symbol) in known:
+                continue
+            status = STATUS_NO_PADJ if pd.isna(row.padj) else (STATUS_LE if row.padj <= float(alpha) else STATUS_GT)
+            rows.append({"tf_symbol": row.tf_symbol, "peak_set": peak_set, "status": status, "padj": row.padj,
+                         "pvalue": row.pvalue, "n_motifs_for_tf": row.n_motifs_for_tf, "motif_name": row.motif_name,
+                         "motif_form": row.motif_form, "match_status": row.match_status})
+    return pd.DataFrame(rows, columns=["tf_symbol", "peak_set", "status", "padj", "pvalue", "n_motifs_for_tf",
+                                       "motif_name", "motif_form", "match_status"])
+
+
+def motif_results_table(imports: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
+    """The long ``motif_results.csv`` table: one row per TF and peak set with the representative motif and flags."""
+    frames = []
+    for peak_set in PEAK_SETS:
+        imported = imports.get(peak_set)
+        if imported is None:
+            continue
+        record = imported["record"]
+        frame = imported["tf_table"].copy()
+        frame.insert(0, "peak_set", peak_set)
+        frame["source_tool"] = record["tool"]
+        frame["import_id"] = record["import_id"]
+        frame["threshold_matches_current"] = record["threshold_matches_current"]
+        frame["background_differs_from_brim"] = record["background_differs_from_brim"]
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def motif_symbol_map_table(imports: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
+    """The ``motif_symbol_map.csv`` table: every motif row and how it was matched, unmatched rows included."""
+    frames = []
+    for peak_set in PEAK_SETS:
+        imported = imports.get(peak_set)
+        if imported is not None:
+            frame = imported["symbol_map"].copy()
+            frame.insert(0, "peak_set", peak_set)
+            frames.append(frame)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def build_motif_summary(source: Mapping[str, Any], state: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Build the ``tf_level3`` manifest block from the BED preparation record and the current imports (single source)."""
+    imports = (state or {}).get("imports", {})
+    peak_set_keys = ("thresholds", "genome_build", "species", "coordinate_convention", "counts", "bed_sha256",
+                     "peakset_fingerprint", "background_definition", "background_definition_ja", "threshold_source_note",
+                     "generated_at", "app_version", "warnings")
+    return _json_safe({
+        "status": "imported" if imports else "bed_prepared_no_import",
+        "peak_sets": {key: source[key] for key in peak_set_keys},
+        "imports": {peak_set: imports[peak_set]["record"] for peak_set in PEAK_SETS if peak_set in imports},
+        "import_history": list((state or {}).get("history", [])),
+        "symbol_normalization_rule": SYMBOL_RULE_TEXT, "symbol_normalization_rule_ja": SYMBOL_RULE_TEXT_JA,
+        "representative_motif_rule": REPRESENTATIVE_MOTIF_RULE, "motif_alpha_display": "display only; counts nothing",
+        "n_axes_note": N_AXES_NOTE, "n_axes_note_ja": N_AXES_NOTE_JA, "independence_note": INDEPENDENCE_NOTE,
+        "tf_level2_motif_axis_note": "tf_level2.motif_axis describes the Level 2 run only; the Level 3 state is in this block.",
+        "limitations_text": list(LIMITATIONS_EN), "limitations_text_ja": list(LIMITATIONS_JA),
+        "external_services_used": [], "external_tool_executed_by_brim": False,
+        "exported_files_sha256": source["exported_files_sha256"],
+    })
+
+
+def level2_limitations_for_display(limits, motif_present: bool) -> list[str]:
+    """Drop the Level 2 'motif not run' sentence while a motif import is present (the Level 2 constants are unchanged)."""
+    if not motif_present:
+        return list(limits)
+    return [sentence for sentence in limits
+            if "Motif enrichment: not run" not in sentence and "motif濃縮は未実行" not in sentence]
+
+
+def build_motif_export_files(bundle: Mapping[str, str] | None, source: Mapping[str, Any] | None,
+                             state: Mapping[str, Any] | None, tf_runs: Mapping[str, Mapping[str, Any]] | None,
+                             alpha: float = 0.05) -> dict[str, str]:
+    """The Level 3 files for the export ZIP (the caller passes only current inputs; stale ones are never passed).
+
+    ``MotifAnalysis/`` appears when the BED files were prepared; the ``Integration/motif_*`` files and
+    ``tf_candidates_with_motif.csv`` appear when at least one result was imported.  ``Integration/tf_candidates.csv``
+    is not touched (it keeps ``motif_status=not_run`` by design).
+    """
+    files: dict[str, str] = {}
+    if bundle and source is not None:
+        files.update(bundle)
+    imports = (state or {}).get("imports", {})
+    if not imports or source is None:
+        return files
+    files["Integration/motif_results.csv"] = motif_results_table(imports).to_csv(index=False)
+    files["Integration/motif_symbol_map.csv"] = motif_symbol_map_table(imports).to_csv(index=False)
+    summary = build_motif_summary(source, state)
+    files["Integration/motif_import_record.json"] = json.dumps(
+        {"imports": summary["imports"], "history": summary["import_history"]}, indent=2, ensure_ascii=False, allow_nan=False)
+    frames = []
+    for set_name in sorted(tf_runs or {}):
+        run = tf_runs[set_name]
+        if run.get("status") != "executed" or run["table"].empty:
+            continue
+        frame = attach_motif_enrichment(run["table"], imports, PEAK_SETS, alpha, source_prepared=True)
+        frame["targets_in_set"] = frame["targets_in_set"].map(lambda hits: ";".join(hits))
+        frames.append(frame)
+    if frames:
+        files["Integration/tf_candidates_with_motif.csv"] = pd.concat(frames, ignore_index=True).to_csv(index=False)
+    return files

@@ -1,11 +1,12 @@
 """Phase 6 Level 3 motif import core tests (Streamlit-free), built up step by step.
 
-Step 1: peak sets, BED files, commands, README and the export bundle.  Step 2: reading motif results.
+Step 1: peak sets, BED files, commands, README and the export bundle.  Step 2: reading motif results.  Step 3: symbols, import binding, the Level 2 join, manifest and export files.
 """
 
 from __future__ import annotations
 
 import ast
+import io
 import pathlib
 import re
 
@@ -426,3 +427,353 @@ def test_non_numeric_percentages_are_kept_as_missing_and_do_not_stop_the_import(
 
 def test_homer_header_constant_matches_the_documented_required_columns():
     assert set(mi.HOMER_REQUIRED_HEADERS) <= {h.lower() for h in HOMER_HEADER}
+
+# ----------------------------------------------------------------------------------------------
+# Step 3: TF symbol normalization, import binding, the Level 2 join, manifest block and export files
+# ----------------------------------------------------------------------------------------------
+
+import json  # noqa: E402
+
+import brim_tf_integration as tfi  # noqa: E402
+from tf_support import synthetic_tf_level1_state  # noqa: E402
+
+REFERENCE = ["Stat3", "Oct4", "Sox17", "Myc", "Jun", "Fos"]
+DECLARATION = {"analysis_source": "brim_generated", "genome_attested": True}
+
+
+def _import(peak_set="opening", declaration=None, table=None, reference=None, sets=None):
+    peak_sets = sets or _sets(synthetic_dar_table())
+    return mi.import_motif_result(_homer() if table is None else table, peak_sets, peak_set,
+                                  {**DECLARATION, **(declaration or {})}, REFERENCE if reference is None else reference,
+                                  "2026-09-21T00:00:00")
+
+
+def test_tf_symbols_are_read_from_the_text_before_the_first_paren_or_slash_and_split_at_colons():
+    assert mi.extract_tf_symbols("Stat3(Stat)/Fixture-Stat3-ChIP-Seq(GSE00000)/Homer") == ["Stat3"]
+    assert mi.extract_tf_symbols("Oct4:Sox17(POU,Homeobox/HMG)/Fixture/Homer") == ["Oct4", "Sox17"]
+    assert mi.extract_tf_symbols("AP-1(bZIP)/Fixture/Homer") == ["AP-1"]
+    assert mi.extract_tf_symbols("Foxa1(var.2)/Fixture") == ["Foxa1"]
+    assert mi.extract_tf_symbols("A/B") == ["A"] and mi.extract_tf_symbols("  Myc  ") == ["Myc"]
+    assert mi.extract_tf_symbols("A::B : C(x)") == ["A", "B", "C"]
+    assert mi.extract_tf_symbols("") == [] and mi.extract_tf_symbols("(only)/x") == [] and mi.extract_tf_symbols(":::") == []
+
+
+def test_normalization_matches_ignoring_case_keeps_heterodimers_and_lists_the_unmatched():
+    symbol_map, report = mi.normalize_tf_symbols(_homer().rows, REFERENCE)
+    stat3 = symbol_map.loc[symbol_map["motif_name"].str.lower().str.startswith("stat3")]
+    assert set(stat3["tf_symbol"]) == {"Stat3"} and len(stat3) == 3               # 'stat3' matches the reference spelling
+    oct_sox = symbol_map.loc[symbol_map["motif_name"].str.startswith("Oct4:Sox17")]
+    assert list(oct_sox["tf_symbol"]) == ["Oct4", "Sox17"] and set(oct_sox["motif_form"]) == {"heterodimer"}
+    assert list(oct_sox["partner_components"]) == ["Sox17", "Oct4"] and set(oct_sox["row_match_status"]) == {"matched"}
+    assert set(symbol_map.loc[symbol_map["motif_name"].str.startswith("AP-1"), "row_match_status"]) == {"unmatched"}
+    assert report["n_motif_rows"] == 7 and report["n_rows_matched"] == 5 and report["n_rows_unmatched"] == 2
+    assert report["match_rate"] == pytest.approx(5 / 7) and report["reference_size"] == len(REFERENCE)
+    assert {(u["motif_name"].split("(")[0], u["reason"]) for u in report["unmatched"]} == {
+        ("AP-1", "not_in_reference"), ("NotATf", "not_in_reference")}
+    assert report["rule_text"] == mi.SYMBOL_RULE_TEXT and report["rule_text_ja"]
+    assert len(symbol_map) == 8                                                    # 7 rows, one heterodimer split in two
+
+
+def test_a_heterodimer_with_only_one_known_component_is_partially_matched():
+    symbol_map, report = mi.normalize_tf_symbols(_homer().rows, ["Stat3", "Oct4", "Myc"])
+    row = symbol_map.loc[symbol_map["motif_name"].str.startswith("Oct4:Sox17")]
+    assert set(row["row_match_status"]) == {"partially_matched"}
+    assert list(row["tf_symbol"].fillna("-")) == ["Oct4", "-"] and list(row["unmatched_reason"]) == ["", "not_in_reference"]
+    assert report["n_rows_partially_matched"] == 1
+    assert {"row_status": "partially_matched", "unmatched_symbols": ["Sox17"], "reason": "not_in_reference"}.items() <= [
+        u for u in report["unmatched"] if u["motif_name"].startswith("Oct4:Sox17")][0].items()
+
+
+def test_no_match_at_all_stops_with_a_message_about_species_and_symbols():
+    with pytest.raises(mi.MotifImportError, match="species"):
+        mi.normalize_tf_symbols(_homer().rows, ["Zzz1", "Zzz2"])
+    with pytest.raises(mi.MotifImportError, match="None of the motif names"):
+        mi.normalize_tf_symbols(_homer().rows, [])
+
+
+def test_case_collisions_in_the_reference_pick_the_first_name_and_are_counted():
+    symbol_map, report = mi.normalize_tf_symbols(_homer().rows, ["STAT3", "Stat3", "Myc"])
+    assert set(symbol_map["tf_symbol"].dropna()) == {"STAT3", "Myc"} and report["n_casefold_collisions_reference"] == 1
+
+
+def test_the_representative_motif_is_the_smallest_reported_padj_then_pvalue_then_name_and_all_rows_are_kept():
+    symbol_map, _ = mi.normalize_tf_symbols(_homer().rows, REFERENCE)
+    tf_table = mi.summarize_motif_by_tf(symbol_map).set_index("tf_symbol")
+    stat3 = tf_table.loc["Stat3"]
+    assert stat3["n_motifs_for_tf"] == 3 and stat3["padj"] == 0.0001 and stat3["motif_name"].startswith("Stat3(Stat)/Fixture-Stat3")
+    assert stat3["representative_motif_rule"] == mi.REPRESENTATIVE_MOTIF_RULE and stat3["status"] == "reported"
+    assert tf_table.loc["Myc", "status"] == "no_padj_reported" and pd.isna(tf_table.loc["Myc", "padj"])   # never filled
+    assert tf_table.loc["Oct4", "motif_form"] == "heterodimer" and tf_table.loc["Sox17", "n_motifs_for_tf"] == 1
+    tie = [("Stat3(a)/x", "N", "0.01", "0", "0.05", "1", "1%", "1", "1%"), ("Stat3(b)/x", "N", "0.001", "0", "0.05", "1", "1%", "1", "1%"),
+           ("Stat3(c)/x", "N", "0.001", "0", "0.05", "1", "1%", "1", "1%")]
+    tie_map, _ = mi.normalize_tf_symbols(_homer(homer_known_text(tie)).rows, ["Stat3"])
+    assert mi.summarize_motif_by_tf(tie_map).iloc[0]["motif_name"] == "Stat3(b)/x"        # equal padj: smaller pvalue, then name
+    pd.testing.assert_frame_equal(mi.summarize_motif_by_tf(symbol_map), mi.summarize_motif_by_tf(symbol_map))
+
+
+def test_threshold_comparison_is_exact_and_a_missing_declaration_is_not_a_match():
+    current = {"atac_padj": 0.05, "atac_lfc": 1.0}
+    assert mi.compare_thresholds(current, current)["matches"] is True
+    assert mi.compare_thresholds({"atac_padj": 0.05 + 1e-13, "atac_lfc": 1.0}, current)["matches"] is True
+    result = mi.compare_thresholds({"atac_padj": 0.01, "atac_lfc": 1.0}, current)
+    assert result["matches"] is False and result["differences"] == ["atac_padj"]
+    assert mi.compare_thresholds({"atac_padj": 0.05, "atac_lfc": 1.5}, current)["differences"] == ["atac_lfc"]
+    assert mi.compare_thresholds(None, current)["matches"] is None
+    with pytest.raises(mi.MotifImportError):
+        mi.compare_thresholds({"atac_padj": 3, "atac_lfc": 1.0}, current)
+
+
+def test_an_import_records_the_binding_the_declarations_and_the_conditions_json_safely():
+    peak_sets = _sets(synthetic_dar_table())
+    imported = _import("opening", {"tool_version": "v9", "motif_database": "fixture-db"}, sets=peak_sets)
+    record = imported["record"]
+    assert record["peak_set"] == "opening" and record["peakset_fingerprint"] == peak_sets.peakset_fingerprint
+    assert record["genome_build"] == "hg38" and record["genome_attested"] is True and record["species"] == "Human"
+    assert record["tool"] == "homer_known" and record["tool_version"] == "v9" and record["motif_database"] == "fixture-db"
+    assert record["threshold_matches_current"] is True and record["background_differs_from_brim"] is False
+    assert record["source_file"]["sha256"] == _homer().record["sha256"] and record["analysis_source"] == "brim_generated"
+    assert record["n_peaks_in_peak_set"] == peak_sets.counts["n_opening"] and len(record["import_id"]) == 64
+    assert record["counts"]["n_rows"] == 7 and record["counts"]["n_rows_unmatched"] == 2 and record["unmatched_count"] == 2
+    assert record["unmatched_first_names"] and len(record["unmatched_first_names"]) <= mi.MANIFEST_UNMATCHED_LIMIT
+    codes = {w["code"] for w in record["warnings"]}
+    assert {"target_count_differs", "background_count_differs"} <= codes            # 123 / 4567 do not equal the BED counts
+    json.dumps(record, allow_nan=False)                                             # no NaN anywhere in the record
+    assert _import("closing", sets=peak_sets)["record"]["import_id"] != record["import_id"]
+    assert tuple(imported) == ("peak_set", "record", "rows", "symbol_map", "tf_table", "unmatched")
+    other = _import("opening", {"tool_version": ""}, sets=peak_sets)["record"]
+    assert other["tool_version"] == "not provided" and other["motif_database"] == "not provided"
+
+
+def test_a_threshold_mismatch_warns_and_is_recorded_but_the_import_continues():
+    mismatch = _import("opening", {"analysis_source": "other_file", "declared_thresholds": {"atac_padj": 0.01, "atac_lfc": 1.0}})
+    record = mismatch["record"]
+    assert record["threshold_matches_current"] is False and record["threshold_differences"] == ["atac_padj"]
+    assert record["declared_thresholds"]["atac_padj"] == 0.01 and record["current_thresholds"]["atac_padj"] == 0.05
+    assert "threshold_mismatch" in {w["code"] for w in record["warnings"]}
+    same = _import("opening", {"analysis_source": "other_file", "declared_thresholds": {"atac_padj": 0.05, "atac_lfc": 1.0}})
+    assert same["record"]["threshold_matches_current"] is True
+    assert "threshold_mismatch" not in {w["code"] for w in same["record"]["warnings"]}
+    assert "target_count_differs" not in {w["code"] for w in same["record"]["warnings"]}     # only checked for BRIM's own files
+
+
+def test_a_background_other_than_brims_is_flagged_and_needs_a_description_when_other():
+    tool = _import("opening", {"background_choice": "tool_default"})["record"]
+    assert tool["background_differs_from_brim"] is True and "background_differs_from_brim" in {w["code"] for w in tool["warnings"]}
+    assert "background_count_differs" not in {w["code"] for w in tool["warnings"]}
+    other = _import("opening", {"background_choice": "other", "background_description": " random genome regions "})["record"]
+    assert other["background_description"] == "random genome regions" and other["background_differs_from_brim"] is True
+    default = _import("opening")["record"]
+    assert default["background_differs_from_brim"] is False and default["background_choice"] == "brim_all_tested_peaks"
+    with pytest.raises(mi.MotifImportError, match="Describe the background"):
+        _import("opening", {"background_choice": "other", "background_description": "  "})
+    with pytest.raises(mi.MotifImportError, match="background_choice"):
+        _import("opening", {"background_choice": "everything"})
+
+
+def test_an_import_is_refused_without_the_required_declarations_or_a_matching_peak_set():
+    with pytest.raises(mi.MotifImportError, match="same build"):
+        _import("opening", {"genome_attested": False})
+    with pytest.raises(mi.MotifImportError, match="BED files BRIM wrote"):
+        _import("opening", {"analysis_source": None})
+    with pytest.raises(mi.MotifImportError, match="not prefilled"):
+        _import("opening", {"analysis_source": "other_file"})
+    with pytest.raises(mi.MotifImportError, match="Choose the peak set"):
+        _import("background")
+    empty = _sets(boundary_dar_table().assign(padj=0.9))
+    with pytest.raises(mi.MotifImportError, match="nothing to attach"):
+        _import("opening", sets=empty)
+    closing_file = _generic(generic_motif_csv([("Stat3", "0.1", "0.01", "closing")]),
+                            column_map={"motif_name": "motif", "padj": "q_value", "pvalue": "p_value", "peak_set": "peak_set"})
+    with pytest.raises(mi.MotifImportError, match="selected"):
+        _import("opening", table=closing_file)
+    assert _import("closing", table=closing_file, reference=["Stat3"])["peak_set"] == "closing"
+
+
+def test_import_state_replaces_the_same_peak_set_keeps_the_others_and_appends_the_history():
+    peak_sets = _sets(synthetic_dar_table())
+    state = mi.with_import(None, _import("opening", sets=peak_sets))
+    state = mi.with_import(state, _import("closing", sets=peak_sets))
+    assert set(state["imports"]) == {"opening", "closing"} and [h["peak_set"] for h in state["history"]] == ["opening", "closing"]
+    first_id = state["imports"]["opening"]["record"]["import_id"]
+    again = mi.with_import(state, _import("opening", {"tool_version": "v2"}, sets=peak_sets))
+    assert again["imports"]["opening"]["record"]["tool_version"] == "v2" and again["imports"]["closing"] is state["imports"]["closing"]
+    assert len(again["history"]) == 3 and again["history"][0]["import_id"] == first_id       # history is append-only
+    assert len(state["history"]) == 2                                                          # the old state is not mutated
+    assert mi.empty_motif_state() == {"imports": {}, "history": []}
+
+
+def test_imports_bound_to_a_changed_peak_set_are_dropped_and_the_history_stays():
+    peak_sets = _sets(synthetic_dar_table())
+    state = mi.with_import(mi.with_import(None, _import("opening", sets=peak_sets)), _import("closing", sets=peak_sets))
+    kept = mi.keep_current_imports(state, peak_sets.peakset_fingerprint)
+    assert set(kept["imports"]) == {"opening", "closing"}
+    changed = mi.keep_current_imports(state, "0" * 64)
+    assert changed["imports"] == {} and len(changed["history"]) == 2
+    assert mi.keep_current_imports(None, "x") is None and mi.keep_current_imports(mi.empty_motif_state(), "x") is None
+
+
+def _level2_like(*symbols):
+    return pd.DataFrame({
+        "tf_symbol": list(symbols), "gene_set": "concordant_activation", "n_axes_supported": [2, 1, 0, 0][:len(symbols)],
+        "n_axes_evaluable": 3, "motif_enrichment_padj": float("nan"), "motif_enrichment_score": float("nan"),
+        "motif_status": "not_run", "motif_source": "", "target_enrichment_padj": [0.01, 0.2, 0.5, 0.9][:len(symbols)],
+    })
+
+
+def test_the_join_keeps_rows_and_order_drops_the_placeholders_and_gives_each_status_its_own_meaning():
+    table = _level2_like("STAT3", "Myc", "Fos", "OTHER")
+    before = table.copy(deep=True)
+    imported = _import("opening", {"tool_version": "v9"})
+    joined = mi.attach_motif_enrichment(table, {"opening": imported})
+    pd.testing.assert_frame_equal(table, before)                                       # the stored table is never changed
+    assert list(joined["tf_symbol"]) == ["STAT3", "Myc", "Fos", "OTHER"] and len(joined) == 4
+    assert not set(mi._PLACEHOLDER_COLUMNS) & set(joined.columns)
+    assert list(joined["motif_opening_status"]) == [mi.STATUS_LE, mi.STATUS_NO_PADJ, mi.STATUS_NOT_IN_RESULT, mi.STATUS_NOT_IN_RESULT]
+    assert joined["motif_opening_padj"].iloc[0] == 0.0001 and joined["motif_opening_padj"].iloc[1:].isna().all()
+    assert joined["motif_opening_n_motifs"].iloc[0] == 3 and joined["motif_opening_source_tool"].iloc[0] == "homer_known"
+    assert joined["motif_opening_motif_name"].iloc[0].startswith("Stat3(Stat)/")
+    assert list(joined["motif_closing_status"]) == [mi.STATUS_NOT_RUN] * 4
+    assert list(mi.attach_motif_enrichment(table, {"opening": imported}, source_prepared=True)["motif_closing_status"]) \
+        == [mi.STATUS_NOT_IMPORTED] * 4
+    assert list(joined["n_axes_supported"]) == list(before["n_axes_supported"])         # the Level 2 counts are untouched
+    assert joined["motif_opening_threshold_matches_current"].iloc[0] == True  # noqa: E712
+    assert joined["motif_opening_background_differs_from_brim"].iloc[2] == False  # noqa: E712
+    assert joined["motif_closing_threshold_matches_current"].isna().all()
+
+
+def test_the_join_uses_the_case_folded_symbol_and_shows_heterodimer_and_match_status_columns():
+    imported = _import("opening")
+    joined = mi.attach_motif_enrichment(_level2_like("oct4", "SOX17"), {"opening": imported})
+    assert list(joined["motif_opening_form"]) == ["heterodimer", "heterodimer"]
+    assert list(joined["motif_opening_match_status"]) == ["matched", "matched"]
+    assert joined["motif_opening_motif_name"].iloc[0].startswith("Oct4:Sox17(POU,Homeobox/HMG)")     # the full name is shown
+    partial = _import("opening", reference=["Stat3", "Oct4", "Myc"])
+    partial_join = mi.attach_motif_enrichment(_level2_like("Oct4"), {"opening": partial})
+    assert partial_join["motif_opening_match_status"].iloc[0] == "partially_matched"
+
+
+def test_alpha_only_relabels_the_reported_padj_and_never_changes_anything_else():
+    imported = _import("opening")
+    table = _level2_like("Stat3", "Jun")
+    default = mi.attach_motif_enrichment(table, {"opening": imported})
+    strict = mi.attach_motif_enrichment(table, {"opening": imported}, alpha=0.00001)
+    assert default["motif_opening_status"].iloc[0] == mi.STATUS_LE and strict["motif_opening_status"].iloc[0] == mi.STATUS_GT
+    pd.testing.assert_frame_equal(default.drop(columns=["motif_opening_status"]), strict.drop(columns=["motif_opening_status"]))
+    with pytest.raises(mi.MotifImportError):
+        mi.attach_motif_enrichment(table, {"opening": imported}, alpha=1.5)
+
+
+def test_the_joined_view_has_no_combined_score_columns_and_never_says_not_enriched():
+    joined = mi.attach_motif_enrichment(_level2_like("Stat3", "Myc", "Fos"), {"opening": _import("opening")}, source_prepared=True)
+    offenders = [c for c in joined.columns if any(w in c.lower() for w in ("confidence", "combined", "weighted"))]
+    assert offenders == []
+    statuses = set(pd.concat([joined["motif_opening_status"], joined["motif_closing_status"]]))
+    assert not [s for s in statuses if "enriched" in s] and statuses <= {
+        mi.STATUS_LE, mi.STATUS_GT, mi.STATUS_NO_PADJ, mi.STATUS_NOT_IN_RESULT, mi.STATUS_NOT_IMPORTED, mi.STATUS_NOT_RUN}
+
+
+def test_motif_only_tfs_lists_the_tfs_missing_from_the_level2_table_in_long_format():
+    imports = {"opening": _import("opening")}
+    only = mi.motif_only_tfs(_level2_like("Stat3", "Myc"), imports)
+    assert set(only["tf_symbol"]) == {"Oct4", "Sox17"} and set(only["peak_set"]) == {"opening"}
+    assert set(only["status"]) == {mi.STATUS_LE}
+    assert mi.motif_only_tfs(_level2_like("STAT3", "oct4", "sox17", "MYC"), imports).empty
+    assert mi.motif_only_tfs(_level2_like("Stat3"), {}).empty
+
+
+@pytest.fixture(scope="module")
+def level2_state():
+    return synthetic_tf_level1_state()
+
+
+def _level2_run(level2_state, set_name="concordant_activation"):
+    return tfi.run_level2(
+        level2_state["summary"], set_name, level2_state["network"], level2_state["rna_results"], level2_state["thresholds"],
+        {"reference": "control", "test": "treated"}, level2_state["activity_scores"], level2_state["metadata"]["condition"], 10, 0.05)
+
+
+def _planted_motif_table(planted):
+    rows = [(f"{planted}(Zf)/Fixture/Homer", "N", "1e-12", "-27", "0.0002", "50", "40%", "800", "17%"),
+            ("Myc(bHLH)/Fixture/Homer", "N", "0.1", "-2", "NA", "5", "4%", "400", "9%")]
+    return _homer(homer_known_text(rows))
+
+
+def test_the_summary_block_records_the_bed_preparation_the_imports_and_the_fixed_notes(level2_state):
+    peak_sets = _sets(synthetic_dar_table())
+    bundle = mi.build_motif_bundle(peak_sets, "9.9.9", "2026-09-21T00:00:00")
+    source = mi.prepared_source_record(peak_sets, bundle, "2026-09-21T00:00:00", "9.9.9")
+    assert source["peakset_fingerprint"] == peak_sets.peakset_fingerprint and source["exported_files_sha256"] == mi.bundle_sha256(bundle)
+    none_yet = mi.build_motif_summary(source, None)
+    assert none_yet["status"] == "bed_prepared_no_import" and none_yet["imports"] == {} and none_yet["import_history"] == []
+    planted = level2_state["planted_tf"]
+    state = mi.with_import(None, _import("opening", table=_planted_motif_table(planted), reference=[planted, "Myc"], sets=peak_sets))
+    block = mi.build_motif_summary(source, state)
+    assert block["status"] == "imported" and set(block["imports"]) == {"opening"} and len(block["import_history"]) == 1
+    assert block["external_services_used"] == [] and block["external_tool_executed_by_brim"] is False
+    assert block["peak_sets"]["genome_build"] == "hg38" and block["peak_sets"]["coordinate_convention"] == mi.COORDINATE_CONVENTION
+    assert block["peak_sets"]["counts"]["n_background"] == peak_sets.counts["n_background"]
+    assert block["representative_motif_rule"] == mi.REPRESENTATIVE_MOTIF_RULE and "counts nothing" in block["motif_alpha_display"]
+    assert block["limitations_text"] == list(mi.LIMITATIONS_EN) and block["limitations_text_ja"] == list(mi.LIMITATIONS_JA)
+    assert "Level 2 run only" in block["tf_level2_motif_axis_note"] and block["independence_note"] == mi.INDEPENDENCE_NOTE
+    json.dumps(block, allow_nan=False)                                                                     # NaN-free JSON
+
+
+def test_export_files_follow_what_was_prepared_and_imported_and_never_touch_the_level2_csv(level2_state):
+    peak_sets = _sets(synthetic_dar_table())
+    bundle = mi.build_motif_bundle(peak_sets, "9.9.9", "t")
+    source = mi.prepared_source_record(peak_sets, bundle, "t", "9.9.9")
+    runs = {"concordant_activation": _level2_run(level2_state), "atac_only": _level2_run(level2_state, "atac_only")}
+    assert mi.build_motif_export_files(None, None, None, runs) == {}
+    assert set(mi.build_motif_export_files(bundle, source, None, runs)) == set(bundle)             # BED preparation only
+    assert mi.build_motif_export_files(bundle, None, mi.empty_motif_state(), runs) == {}            # nothing current: nothing exported
+    planted = level2_state["planted_tf"]
+    state = mi.with_import(None, _import("opening", table=_planted_motif_table(planted), reference=[planted, "Myc"], sets=peak_sets))
+    files = mi.build_motif_export_files(bundle, source, state, runs)
+    assert set(files) == set(bundle) | {"Integration/motif_results.csv", "Integration/motif_symbol_map.csv",
+                                        "Integration/motif_import_record.json", "Integration/tf_candidates_with_motif.csv"}
+    assert "Integration/tf_candidates.csv" not in files
+    results = pd.read_csv(io.StringIO(files["Integration/motif_results.csv"]))
+    assert set(results["peak_set"]) == {"opening"} and planted in set(results["tf_symbol"])
+    assert {"threshold_matches_current", "background_differs_from_brim", "n_motifs_for_tf", "source_tool"} <= set(results.columns)
+    symbol_map = pd.read_csv(io.StringIO(files["Integration/motif_symbol_map.csv"]))
+    assert {"peak_set", "row_match_status", "unmatched_reason", "component"} <= set(symbol_map.columns)
+    combined = pd.read_csv(io.StringIO(files["Integration/tf_candidates_with_motif.csv"]))
+    assert set(combined["gene_set"]) == {"concordant_activation", "atac_only"}
+    assert {"motif_opening_status", "motif_closing_status", "motif_opening_threshold_matches_current",
+            "motif_opening_background_differs_from_brim", "n_axes_supported"} <= set(combined.columns)
+    assert not {"motif_status", "motif_enrichment_padj"} & set(combined.columns)
+    row = combined.loc[(combined["tf_symbol"] == planted) & (combined["gene_set"] == "concordant_activation")].iloc[0]
+    assert row["motif_opening_status"] == mi.STATUS_LE and row["motif_closing_status"] == mi.STATUS_NOT_IMPORTED
+    plain = runs["concordant_activation"]["table"]
+    assert list(combined.loc[combined["gene_set"] == "concordant_activation", "tf_symbol"]) == list(plain["tf_symbol"])   # rows and order
+    assert list(combined.loc[combined["gene_set"] == "concordant_activation", "n_axes_supported"]) == list(plain["n_axes_supported"])
+    record = json.loads(files["Integration/motif_import_record.json"])
+    assert set(record) == {"imports", "history"} and set(record["imports"]) == {"opening"} and len(record["history"]) == 1
+    assert plain["motif_status"].eq("not_run").all()                                                # the Level 2 table is unchanged
+    for path, text in bundle.items():
+        assert files[path] == text and source["exported_files_sha256"][path] == mi.bundle_sha256(bundle)[path]
+
+
+def test_the_level2_not_run_sentence_is_hidden_only_while_a_motif_import_is_present():
+    english, japanese = list(tfi.LIMITATIONS_EN), list(tfi.LIMITATIONS_JA)
+    assert mi.level2_limitations_for_display(english, False) == english
+    shown = mi.level2_limitations_for_display(english, True)
+    assert len(shown) == len(english) - 1 and not [s for s in shown if "Motif enrichment: not run" in s]
+    assert len(mi.level2_limitations_for_display(japanese, True)) == len(japanese) - 1
+    assert list(tfi.LIMITATIONS_EN) == english                                                       # the constants are unchanged
+
+
+def test_level3_texts_have_no_causal_wording_and_state_the_required_points():
+    texts = list(mi.LIMITATIONS_EN) + list(mi.LIMITATIONS_JA) + [mi.SYMBOL_RULE_TEXT, mi.SYMBOL_RULE_TEXT_JA, mi.N_AXES_NOTE,
+                                                                 mi.N_AXES_NOTE_JA, mi.INDEPENDENCE_NOTE]
+    imported = _import("opening", {"analysis_source": "other_file", "declared_thresholds": {"atac_padj": 0.01, "atac_lfc": 1.0},
+                                   "background_choice": "tool_default"})
+    for warning in imported["record"]["warnings"]:
+        texts += [warning["message"], warning["message_ja"]]
+    for text in texts:
+        for pattern in mi.CAUSAL_PATTERNS:
+            assert not re.search(pattern, text, re.IGNORECASE), text
+    joined = " ".join(mi.LIMITATIONS_EN)
+    assert "does not show that the TF binds there" in joined and "does not correct, recompute or combine" in joined
+    assert "not paired with Level 2 gene sets" in joined and "not in result" in joined and "sorting aid" in joined
+    assert len(mi.LIMITATIONS_EN) == len(mi.LIMITATIONS_JA) == 8
