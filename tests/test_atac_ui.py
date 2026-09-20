@@ -180,10 +180,13 @@ def test_dar_table_atac_ui_validates_independently_and_renders_japanese(monkeypa
     app.session_state["atac_input_mode"] = "dar_table"
     app.run()
     assert not app.exception
+    app.text_input(key="atac_dar_reference_condition").set_value("Control").run()
+    app.text_input(key="atac_dar_test_condition").set_value("Treated").run()
     app.button(key="atac_validate_dar").click().run()
     assert not app.exception
     result = app.session_state["atac_results"]
     assert result is not None
+    assert app.session_state["atac_contrast"] == {"reference": "Control", "test": "Treated"}
     assert result["accessibility_direction"].tolist() == ["opening", "closing"]
     app.button(key="atac_annotate").click().run()
     assert not app.exception

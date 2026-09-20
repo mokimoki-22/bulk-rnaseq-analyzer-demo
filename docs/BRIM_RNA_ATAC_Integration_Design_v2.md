@@ -348,6 +348,16 @@ class別KEGG/GO ORAは重複を除いたgene summaryで実行する。background
 not-tested、unmapped、`rna_only_no_mapped_peak`はinput/backgroundから除外する。ORA padjは
 RNA/ATAC padjの続きでも統合値でもない新規検定として明示し、因果表現を用いない。
 
+Integrationは表示用`last_contrast`を使用せず、RNA/ATAC双方の`reference`/`test`を持つ
+構造化contrastを厳密照合する。DAR tableは両ラベルの明示入力を必須とし、空・同一ラベルを
+拒否する。ファイル名・表示文言からの推測やlog2FCの自動反転は行わず、不一致は統合を停止する。
+入力・contrast・再実行の変更は統合とcontrast objectを無効化し、実行した両objectをsummaryと
+manifestに原文のまま保存する。
+
+同梱ライブラリはHumanではlocal KEGGとGO-BP、Mouseではlocal KEGGのみを実行する。Mouseの
+GO-BPは同梱GO libraryがhuman gene symbol用であるため無効化し、未実行理由を日英で表示・記録する。
+種間変換、online fallback、新規依存、network accessは追加しない。
+
 ### 6.4 レベル2のテーブル表示
 
 レベル2の中心は次のテーブルである。motif列は最初から表示し、未実行であることを明示する。

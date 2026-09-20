@@ -144,7 +144,23 @@ build_integration_summary(edges, genes, settings) -> dict
 `CompatibilityResult` の `errors`、`warnings`、gene-ID対応件数・率は設計書§8・§10に従う。
 解析層はメタデータや閾値をsession stateから読まない。
 
-### 3.3 `brim_tf_integration.py`（Phase 5–6）
+### 3.3 `brim_integration_enrichment.py`（Phase 4）
+
+Level 1のclass別ローカルORAの入力集合・background・species別利用可否を定義する。
+Streamlit、network access、session stateを持たず、実行は明示的なUI actionからだけ呼ばれる。
+
+```python
+build_ora_background(summary) -> list[str]
+prepare_class_ora(summary, integration_class) -> tuple[list[str], list[str], list[str]]
+run_class_ora(summary, integration_class, species, runner=run_overrepresentation) -> dict
+```
+
+backgroundはRNA検定済みで、少なくとも1本のATAC検定済みmapped peakを持つgene summaryに
+限定し、`not_significant`を含む。未検定・unmapped・`rna_only_no_mapped_peak`は含めない。
+Humanは同梱KEGG/GO-BPを、Mouseは同梱KEGGのみを利用する。Mouse GO-BPはhuman symbolの
+同梱ライブラリを誤用しないため、未実行理由を結果とprovenanceに残す。
+
+### 3.4 `brim_tf_integration.py`（Phase 5–6）
 
 TF候補の推定と、外部motif結果の統合。
 
@@ -163,7 +179,7 @@ TF network の取得は既存 `brim_tf_networks.py` の
 `load_collectri_network` / `load_dorothea_network` を再利用する。
 TF activity の推定は既存 `infer_tf_activity` の結果を受け取るのみで、再計算しない。
 
-### 3.4 `brim_provenance.py`（Phase 0.5）
+### 3.5 `brim_provenance.py`（Phase 0.5）
 
 manifest生成。**RNA単独解析でもこのモジュールを経由する。**
 
@@ -213,7 +229,8 @@ deg_results                            ↓ run_dar
     │                                  │
     └──────────────┬───────────────────┘
                    ↓ classify_integration_edges
-        統合edgeテーブル（§8.3）／gene summary（§8.4）   ← レベル1
+        統合edgeテーブル（§8.3）／gene summary（§8.4）
+                   ↓ class-specific local ORA              ← レベル1
                    ↓ test_target_enrichment 他
         TF候補テーブル（§8.5、motif列はNA）              ← レベル2
                    ↓ attach_motif_enrichment

@@ -116,7 +116,12 @@ def test_rna_resets_clear_integration_results_but_keep_atac_input():
     for reset in (app.reset_data_results, app.reset_contrast_results, app.reset_threshold_dependent_results):
         st.session_state["integration_edge_results"] = pd.DataFrame({"old": [1]})
         st.session_state["integration_gene_results"] = pd.DataFrame({"old": [1]})
+        st.session_state["rna_contrast"] = {"reference": "control", "test": "treated"}
         reset()
         assert st.session_state["integration_edge_results"] is None
         assert st.session_state["integration_gene_results"] is None
         assert st.session_state["atac_counts_df"] is not None
+        if reset is app.reset_threshold_dependent_results:
+            assert st.session_state["rna_contrast"] == {"reference": "control", "test": "treated"}
+        else:
+            assert st.session_state["rna_contrast"] is None

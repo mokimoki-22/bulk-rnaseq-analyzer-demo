@@ -13,6 +13,8 @@ import zlib
 from contextlib import contextmanager
 from dataclasses import asdict
 import brim_atac
+import brim_integration_enrichment
+import brim_multiomics
 import brim_provenance
 from scipy import stats
 from sklearn.decomposition import PCA
@@ -215,6 +217,7 @@ if "deg_results" not in st.session_state: st.session_state["deg_results"] = None
 if "metadata" not in st.session_state: st.session_state["metadata"] = None
 if "conditions" not in st.session_state: st.session_state["conditions"] = [] # BUG FIX: バグ④
 if "last_contrast" not in st.session_state: st.session_state["last_contrast"] = ""
+if "rna_contrast" not in st.session_state: st.session_state["rna_contrast"] = None
 if "venn_deg_sets"  not in st.session_state: st.session_state["venn_deg_sets"]  = None
 if "venn_v_sel"     not in st.session_state: st.session_state["venn_v_sel"]     = None
 if "venn_enr_kegg"  not in st.session_state: st.session_state["venn_enr_kegg"]  = None
@@ -276,6 +279,7 @@ for _atac_key, _atac_default in _ATAC_STATE_DEFAULTS.items():
 _DATA_RESULT_DEFAULTS = {
     "deg_results": None,
     "last_contrast": "",
+    "rna_contrast": None,
     "batch_deg_results": {},
     "batch_deg_provenance": {},
     "enr_kegg": None,
@@ -310,14 +314,14 @@ def reset_data_results():
 def reset_tf_integration_results():
     """Clear future level-2/3 outputs after an upstream ATAC/RNA change."""
     for key in ("integration_enrichment", "integration_tf_results", "integration_motif_results",
-                "integration_motif_source", "integration_provenance"):
+                "integration_motif_source"):
         st.session_state[key] = None
 
 
 def reset_integration_results():
     """Clear every future level-1 integration output without deleting ATAC input."""
     for key in ("integration_edge_results", "integration_gene_results", "integration_settings",
-                "integration_summary"):
+                "integration_summary", "integration_provenance"):
         st.session_state[key] = None
     reset_tf_integration_results()
 
@@ -335,6 +339,7 @@ def reset_atac_results():
     st.session_state["atac_validated_df"] = None
     st.session_state["atac_validation_report"] = None
     st.session_state["atac_results"] = None
+    st.session_state["atac_contrast"] = None
     reset_peak_mapping_results()
 
 
@@ -365,7 +370,7 @@ def has_data_results():
     return False
 
 
-def reset_contrast_results():
+def reset_contrast_results(clear_rna_contrast=True):
     """Clear outputs that depend on the currently selected DEG contrast."""
     for key in (
         "enr_kegg", "enr_go", "gsea_results", "gsea_object",
@@ -373,12 +378,14 @@ def reset_contrast_results():
         "custom_gene_list",
     ):
         st.session_state[key] = [] if key == "custom_gene_list" else None
+    if clear_rna_contrast:
+        st.session_state["rna_contrast"] = None
     reset_integration_results()
 
 
 def reset_threshold_dependent_results():
     """Clear cached selections/results whose gene membership uses DEG thresholds."""
-    reset_contrast_results()
+    reset_contrast_results(clear_rna_contrast=False)
     for key in ("venn_deg_sets", "venn_v_sel", "venn_enr_kegg", "venn_enr_go"):
         st.session_state[key] = None
 
@@ -1072,6 +1079,7 @@ def collect_all_results():
                 "min_samples": st.session_state.get("filter_min_samples", 2),
             },
             "contrast": st.session_state.get("last_contrast", ""),
+            "structured_contrast": st.session_state.get("rna_contrast"),
             "analysis_log": st.session_state.get("analysis_log", []),
             "gene_id_mapping": st.session_state["rna_id_mapping"],
             "log2fc_inverted": False,
@@ -1126,6 +1134,35 @@ def collect_all_results():
             files["Provenance/reference_manifest.json"] = json.dumps(
                 st.session_state["atac_reference_metadata"], indent=2, ensure_ascii=False, allow_nan=False
             )
+    integration_edges = st.session_state.get("integration_edge_results")
+    integration_genes = st.session_state.get("integration_gene_results")
+    integration_summary = st.session_state.get("integration_summary")
+    integration_provenance = st.session_state.get("integration_provenance")
+    if integration_edges is not None and integration_genes is not None:
+        files["Integration/integration_edges.csv"] = integration_edges.to_csv(index=False)
+        files["Integration/gene_summary.csv"] = integration_genes.to_csv(index=False)
+        files["Integration/summary.json"] = json.dumps(
+            integration_summary or {}, indent=2, ensure_ascii=False, allow_nan=False
+        )
+        files["Integration/analysis_notebook.md"] = (
+            "# Level 1 Integration Notebook\n\n"
+            + json.dumps(integration_provenance or {}, indent=2, ensure_ascii=False, allow_nan=False)
+            + "\n"
+        )
+        enrichment = st.session_state.get("integration_enrichment") or {}
+        ora_history = []
+        for integration_class, ora_result in enrichment.items():
+            ora_history.extend(ora_result.get("history", []))
+            for library_type, library_result in ora_result.get("libraries", {}).items():
+                result_frame = library_result.get("results")
+                if isinstance(result_frame, pd.DataFrame):
+                    files[f"Integration/ORA/{integration_class}_{library_type}.csv"] = result_frame.to_csv(index=False)
+        files["Integration/ORA/history.json"] = json.dumps(ora_history, indent=2, ensure_ascii=False, allow_nan=False)
+        settings["integration"] = integration_provenance
+        counts["integration"] = {
+            "edge_count": int(len(integration_edges)), "gene_count": int(len(integration_genes)),
+            "gene_classes": (integration_summary or {}).get("gene_classes", {}), "ora_history": ora_history,
+        }
     if inputs["rna"] is not None or inputs["atac"] is not None:
         events = st.session_state["external_service_events"]
         manifest = brim_provenance.build_manifest(
@@ -1817,13 +1854,29 @@ def _render_atac_dar_table_controls(uploaded_file, separator, lang):
                                                      key="atac_dar_padj_threshold", on_change=reset_atac_results))
     lfc_threshold = float(columns[1].number_input(ui("ATAC |log2FC| threshold", lang, "ATAC |log2FC|閾値"), 0.0, value=1.0,
                                                     key="atac_dar_lfc_threshold", on_change=reset_atac_results))
+    contrast_columns = st.columns(2)
+    reference = contrast_columns[0].text_input(
+        ui("Reference condition (required)", lang, "基準群（必須）"), key="atac_dar_reference_condition",
+        on_change=reset_atac_results,
+    ).strip()
+    test = contrast_columns[1].text_input(
+        ui("Test condition (required)", lang, "比較群（必須）"), key="atac_dar_test_condition",
+        on_change=reset_atac_results,
+    ).strip()
+    st.caption(ui("Enter the exact DAR contrast labels. BRIM does not infer direction from a file name or reverse log2FC.", lang,
+                  "DARのcontrastラベルを正確に入力してください。BRIMはファイル名から方向を推測せず、log2FCを反転しません。"))
     if st.button(ui("Validate DAR table", lang, "DAR表を検証"), key="atac_validate_dar"):
+        if not reference or not test or reference == test:
+            st.error(ui("Reference and test conditions must be non-empty and different.", lang,
+                        "基準群と比較群は空でなく、異なる名前にしてください。"))
+            return
         try:
             result = brim_atac.read_dar_table(uploaded_file, separator, padj_threshold, lfc_threshold,
                                                coordinate_system, column_map or None)
             st.session_state["atac_input_df"] = result
             st.session_state["atac_validated_df"] = result
             st.session_state["atac_results"] = result
+            st.session_state["atac_contrast"] = {"reference": reference, "test": test}
             st.session_state["atac_validation_report"] = {
                 "source_mode": "dar_table", "coordinate_system": coordinate_system, "column_map": column_map,
                 "transforms": result.attrs.get("transforms", []),
@@ -1872,6 +1925,221 @@ def render_atac_ui(lang):
         _render_atac_dar_table_controls(uploaded_file, separator, lang)
     _render_atac_annotation_controls(lang)
     _render_atac_results(lang)
+
+
+def _integration_species_name():
+    """Translate the explicit RNA species metadata to the integration contract."""
+    return {"hsa": "Human", "mmu": "Mouse"}.get(st.session_state.get("sp", {}).get("org"))
+
+
+def _integration_thresholds():
+    """Read the already selected RNA and ATAC thresholds without applying defaults."""
+    atac = (st.session_state.get("atac_validation_report") or {}).get("thresholds") or {}
+    return {
+        "rna_padj": float(st.session_state.get("padj_t", 0.05)),
+        "rna_lfc": float(st.session_state.get("lfc_t", 1.0)),
+        "atac_padj": float(atac.get("padj", 0.05)),
+        "atac_lfc": float(atac.get("log2FoldChange", 1.0)),
+    }
+
+
+def _integration_metadata(rna, gene_id_type):
+    """Build explicit compatibility metadata; never parse display contrasts."""
+    species = _integration_species_name()
+    edges = st.session_state.get("atac_peak_gene_edges")
+    atac_species = st.session_state.get("atac_species")
+    edge_column = gene_id_type
+    return {
+        "rna": {
+            "species": species, "genome_build": "not_applicable",
+            "contrast": st.session_state.get("rna_contrast"),
+            "gene_keys": rna["gene_key"].astype(str).tolist(),
+        },
+        "atac": {
+            "species": atac_species, "genome_build": st.session_state.get("atac_genome_build"),
+            "contrast": st.session_state.get("atac_contrast"),
+            "gene_keys": edges[edge_column].astype(str).str.strip().tolist(),
+        },
+    }
+
+
+def _integration_plot_data(genes, edges):
+    """Choose the recorded representative peak for a gene-summary quadrant."""
+    required = {"gene_key", "representative_peak_id", "integration_class", "rna_log2FoldChange",
+                "rna_padj_is_na", "rna_lfc_is_na", "n_atac_tested_peaks", "accessibility_pattern"}
+    if not required.issubset(genes.columns):
+        return pd.DataFrame()
+    representative = edges[["gene_key", "peak_id", "atac_log2FoldChange"]].drop_duplicates(
+        ["gene_key", "peak_id"]
+    )
+    plot_data = genes.merge(
+        representative, how="left", left_on=["gene_key", "representative_peak_id"],
+        right_on=["gene_key", "peak_id"], validate="one_to_one",
+    )
+    return plot_data.loc[
+        ~plot_data["rna_padj_is_na"].astype(bool)
+        & ~plot_data["rna_lfc_is_na"].astype(bool)
+        & plot_data["n_atac_tested_peaks"].gt(0)
+        & plot_data["accessibility_pattern"].ne("mixed_accessibility")
+        & plot_data["atac_log2FoldChange"].notna()
+    ].copy()
+
+
+def _render_integration_ui(lang):
+    """Render only approved Phase 4 Level 1 integration controls and results."""
+    st.header(ui("RNA–ATAC integration (Level 1)", lang, "RNA–ATAC統合解析（レベル1）"))
+    st.caption(ui(
+        "Compare expression and accessibility evidence. This view does not establish causation.", lang,
+        "発現とaccessibilityの根拠を比較します。この表示は因果関係を示すものではありません。",
+    ))
+    gene_id_type = st.radio(
+        ui("RNA identifier used for matching", lang, "照合に使うRNA識別子"),
+        ["gene_symbol", "gene_id"], horizontal=True, key="integration_rna_gene_id_type",
+        format_func=lambda value: ui("Gene symbol", lang, "遺伝子シンボル")
+        if value == "gene_symbol" else ui("Gene ID", lang, "遺伝子ID"),
+        on_change=reset_integration_results,
+    )
+    try:
+        rna = brim_multiomics.standardize_rna_results(st.session_state["deg_results"], gene_id_type)
+        metadata = _integration_metadata(rna, gene_id_type)
+        compatibility = brim_multiomics.check_integration_compatibility(metadata["rna"], metadata["atac"])
+    except brim_multiomics.IntegrationError as error:
+        st.error(str(error))
+        return
+    st.subheader(ui("Compatibility check", lang, "互換性チェック"))
+    metrics = st.columns(3)
+    metrics[0].metric(ui("RNA genes", lang, "RNA遺伝子数"), compatibility.counts["n_rna_unique_genes"])
+    metrics[1].metric(ui("Mapped ATAC genes", lang, "対応付け済みATAC遺伝子数"), compatibility.counts["n_atac_unique_mapped_genes"])
+    metrics[2].metric(ui("Shared identifiers", lang, "共有識別子数"), compatibility.counts["n_shared_genes"])
+    for error in compatibility.errors:
+        st.error(error)
+    for warning in compatibility.warnings:
+        st.warning(ui(warning, lang, "統合は共有IDのみに基づきます。低い対応率はID種別、species、annotation release、または入力の不一致を示す可能性があります。結果を生物学的な欠如と解釈しないでください。"))
+    thresholds = _integration_thresholds()
+    st.caption(ui(
+        "Thresholds — RNA: padj ≤ {rp:.3g}, |log2FC| ≥ {rl:.3g}; ATAC: padj ≤ {ap:.3g}, |log2FC| ≥ {al:.3g}.".format(
+            rp=thresholds["rna_padj"], rl=thresholds["rna_lfc"], ap=thresholds["atac_padj"], al=thresholds["atac_lfc"]
+        ), lang,
+        "閾値 — RNA: padj ≤ {rp:.3g}, |log2FC| ≥ {rl:.3g}; ATAC: padj ≤ {ap:.3g}, |log2FC| ≥ {al:.3g}。".format(
+            rp=thresholds["rna_padj"], rl=thresholds["rna_lfc"], ap=thresholds["atac_padj"], al=thresholds["atac_lfc"]
+        ),
+    ))
+    if st.button(ui("Run Level 1 integration", lang, "レベル1統合を実行"), key="integration_run", disabled=not compatibility.compatible):
+        try:
+            integrated = brim_multiomics.integrate_peak_gene_edges(
+                rna, st.session_state["atac_peak_gene_edges"], thresholds
+            )
+            classified = brim_multiomics.classify_integration_edges(integrated, thresholds)
+            genes = brim_multiomics.summarize_integration_by_gene(classified, thresholds)
+            settings = {
+                "thresholds": thresholds, "rna_gene_id_type": gene_id_type,
+                "rna_contrast": dict(st.session_state["rna_contrast"]),
+                "atac_contrast": dict(st.session_state["atac_contrast"]),
+                "species": metadata["rna"]["species"], "genome_build": metadata["atac"]["genome_build"],
+            }
+            summary = brim_multiomics.build_integration_summary(classified, genes, settings)
+            st.session_state["integration_edge_results"] = classified
+            st.session_state["integration_gene_results"] = genes
+            st.session_state["integration_settings"] = settings
+            st.session_state["integration_summary"] = summary
+            st.session_state["integration_provenance"] = {
+                "compatibility": {
+                    "counts": dict(compatibility.counts), "rates": dict(compatibility.rates),
+                    "warnings": list(compatibility.warnings), "errors": list(compatibility.errors),
+                },
+                **settings, "ora_history": [],
+            }
+            log_analysis("Level 1 RNA–ATAC integration", "Classified preserved peak–gene edges and gene summaries.")
+            st.success(ui("Level 1 integration completed.", lang, "レベル1統合が完了しました。"))
+        except brim_multiomics.IntegrationError as error:
+            st.error(str(error))
+    edges = st.session_state.get("integration_edge_results")
+    genes = st.session_state.get("integration_gene_results")
+    if edges is None or genes is None:
+        return
+    st.divider()
+    st.subheader(ui("Integrated evidence", lang, "統合エビデンス"))
+    class_counts = genes["integration_class"].value_counts().rename_axis("class").reset_index(name="genes")
+    st.dataframe(class_counts, use_container_width=True)
+    plot_data = _integration_plot_data(genes, edges)
+    unmapped_peaks = st.session_state.get("atac_unmapped_peaks")
+    exclusion_counts = {
+        "both_not_tested": int((genes["integration_class"] == "both_not_tested").sum()),
+        "rna_not_tested": int((genes["integration_class"] == "rna_not_tested").sum()),
+        "atac_not_tested": int((genes["integration_class"] == "atac_not_tested").sum()),
+        "mixed_accessibility": int((genes["integration_class"] == "mixed_accessibility").sum()),
+        "rna_only_no_mapped_peak": int((genes["integration_class"] == "rna_only_no_mapped_peak").sum()),
+        "missing_atac_coordinates": 0 if unmapped_peaks is None else len(unmapped_peaks),
+    }
+    if not plot_data.empty:
+        figure = px.scatter(
+            plot_data, x="rna_log2FoldChange", y="atac_log2FoldChange", color="integration_class",
+            hover_name="gene_symbol", labels={"rna_log2FoldChange": "RNA log2FC", "atac_log2FoldChange": "ATAC log2FC"},
+            title=ui("Gene-summary RNA–ATAC quadrant", lang, "gene summary RNA–ATAC quadrant"),
+        )
+        figure.add_hline(y=0, line_dash="dot")
+        figure.add_vline(x=0, line_dash="dot")
+        st.plotly_chart(figure, use_container_width=True)
+    else:
+        st.info(ui("No tested, mapped, non-mixed gene summaries are available for the quadrant.", lang,
+                   "quadrantに表示できる検定済み・対応付け済み・非mixedのgene summaryがありません。"))
+    st.caption(ui(
+        "Unit: gene summary; thresholds shown above; total genes: {total}; plotted: {drawn}; exclusions: {excluded}.".format(
+            total=len(genes), drawn=len(plot_data), excluded=exclusion_counts
+        ), lang,
+        "解析単位: gene summary。閾値は上記。総遺伝子数: {total}; 描画数: {drawn}; 除外内訳: {excluded}。".format(
+            total=len(genes), drawn=len(plot_data), excluded=exclusion_counts
+        ),
+    ))
+    table_unit = st.radio(ui("Evidence-table unit", lang, "エビデンステーブルの単位"),
+                          ["gene", "edge"], horizontal=True, key="integration_table_unit")
+    source = genes if table_unit == "gene" else edges
+    classes = sorted(source["integration_class"].dropna().unique())
+    selected_classes = st.multiselect(ui("Show classes", lang, "表示するclass"), classes, default=classes,
+                                      key="integration_class_filter")
+    if table_unit == "edge":
+        st.warning(ui("Each peak–gene edge is retained; one gene can therefore appear more than once.", lang,
+                      "peak–gene edgeは保持されるため、同じgeneが複数回表示されることがあります。"))
+    st.dataframe(source.loc[source["integration_class"].isin(selected_classes)], use_container_width=True)
+    st.subheader(ui("Class-specific local ORA", lang, "class別ローカルORA"))
+    available_classes = sorted(set(genes["integration_class"]).intersection(brim_integration_enrichment.ORA_CLASSES))
+    if not available_classes:
+        st.info(ui("No eligible Level 1 class is available for ORA.", lang, "ORA対象のレベル1classがありません。"))
+        return
+    ora_class = st.selectbox(ui("Integration class", lang, "統合class"), available_classes, key="integration_ora_class")
+    if st.button(ui("Run local ORA", lang, "ローカルORAを実行"), key="integration_run_ora"):
+        try:
+            ora_result = brim_integration_enrichment.run_class_ora(
+                genes, ora_class, st.session_state["integration_settings"]["species"]
+            )
+            results = dict(st.session_state.get("integration_enrichment") or {})
+            results[ora_class] = ora_result
+            st.session_state["integration_enrichment"] = results
+            provenance = dict(st.session_state.get("integration_provenance") or {})
+            provenance["ora_history"] = [
+                {"integration_class": key, **record}
+                for key, item in results.items() for record in item.get("history", [])
+            ]
+            st.session_state["integration_provenance"] = provenance
+            log_analysis("Local integration ORA", f"Class: {ora_class}; local species-specific libraries only.")
+        except brim_multiomics.IntegrationError as error:
+            st.error(str(error))
+    ora_result = (st.session_state.get("integration_enrichment") or {}).get(ora_class)
+    if ora_result is not None:
+        for warning in ora_result["warnings"]:
+            st.warning(ui(warning, lang, "選択した遺伝子集合は20未満です。ORAは探索的に解釈してください。"))
+        st.caption(ui(ora_result["independent_test_notice"], lang,
+                      "ORAのpadjはRNA/ATACのpadjと結合しない、新しい独立した検定です。"))
+        for library_type, library_result in ora_result["libraries"].items():
+            status = library_result["status"]
+            if status == "executed":
+                st.markdown(f"**{library_type}: {library_result['library']}**")
+                st.dataframe(library_result["results"], use_container_width=True)
+            elif status == "zero_overlap":
+                st.info(ui(f"{library_type}: no local pathway overlaps were found.", lang,
+                           f"{library_type}: ローカル経路との重複は見つかりませんでした。"))
+            else:
+                st.info(ui(library_result["reason"], lang, library_result.get("reason_ja", library_result["reason"])))
 
 
 tab_upload, tab_deg, tab_multiomics, tab_viz, tab_network, tab_meta, tab_export, tab_info = st.tabs([
@@ -2694,9 +2962,21 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
 
 # TAB 2: DEG
 with tab_multiomics:
-    atac_tab = st.tabs([ui("ATAC-seq", lang, "ATAC-seq")])[0]
+    _integration_ready = (
+        st.session_state.get("deg_results") is not None
+        and st.session_state.get("atac_results") is not None
+        and st.session_state.get("atac_peak_gene_edges") is not None
+    )
+    _multi_tabs = st.tabs(
+        [ui("ATAC-seq", lang, "ATAC-seq")]
+        + ([ui("Integration", lang, "統合解析")] if _integration_ready else [])
+    )
+    atac_tab = _multi_tabs[0]
     with atac_tab:
         render_atac_ui(lang)
+    if _integration_ready:
+        with _multi_tabs[1]:
+            _render_integration_ui(lang)
 
 
 with tab_deg:
@@ -2830,6 +3110,7 @@ with tab_deg:
                             reset_contrast_results()
                             st.session_state["deg_results"] = res
                             st.session_state["last_contrast"] = f"{test} vs {ref}"
+                            st.session_state["rna_contrast"] = {"reference": ref, "test": test}
                             status.update(label="Analysis Complete!", state="complete", expanded=False)
                         st.balloons()
                         st.success("✅ " + (ui("Analysis complete! Check results in the 'Visualization' or 'Network' tab.", lang, '解析完了！『Visualization』または『Network』タブで結果を確認してください。')))
