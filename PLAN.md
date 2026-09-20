@@ -14,10 +14,14 @@
   Ubuntu/Windows × Python 3.11/3.12の4環境）は成功。監査役A・Bの指摘（ORA背景遺伝子の
   定義・件数の表示、`mixed_accessibility`の方向非依存ラベル、README/CHANGELOG/PLANの整合、
   contrast未指定テスト）を是正し、A・B再監査で双方GO。Level 2/3のUI・処理・exportは追加していない。
-  是正を含む本status更新commitのCIは、push後に別途確認する。
+  是正commit `7aa6da5`の4環境CIも成功。監査役Cの判断（2026-09-20）: Phase 4はCI成功をもって
+  クローズし、DAR contrastの取り違えは検出不能であることをREADMEとUI注記に明記（文言のみ）、
+  ORA結果CSVの上書きは文書化のまま許容（Phase 5でORA exportを触る場合は実行ID付き名称を検討）、
+  ローカルPython 3.9環境の失敗はCONTRIBUTING.mdの3.11/3.12要件どおりで許容とした。
 - **Last implementation commits:** `2c9acd1`（Phase 4 Level 1 integration UI、local ORA、共有
   export/provenance）、`e2922b9`（Integration provenanceとORA履歴）、`d2674ec`（ORA背景説明）。
-- **Last verified CI:** run `35507389636`、`d2674ec`、4環境すべて成功（2026-09-20確認）。
+- **Last verified CI:** run `35509331905`、`7aa6da5`（A・B GO後のPhase 4是正commit）、
+  4環境すべて成功（2026-09-20確認）。run `35507389636`（`d2674ec`）も4環境成功。
 - **Phase 3 completion:** 監査役A・Bが最終GO、`e43801f`の4環境CI成功（run `35482053565`）。
   計画判断は監査役C（gene ID共有0件のみ停止、80%未満は強い警告、双方未検定は
   `both_not_tested`）。詳細は設計書§6.3・§8・§10と`docs/phase3_implementation_plan.md`。
@@ -31,8 +35,8 @@
 - **OPEN QUESTIONS:** なし。残存事項（非ブロッカー）: 設計書のLevel 1/2/3ステージ1行表示は
   未実装（Phase 5で扱う）。DAR contrastのラベルは利用者入力のため、入力誤りはデータから
   検出できない（ラベル未指定・不一致は実行を拒否する）。
-- **Next task:** 本commitのGitHub Actions（4環境）を確認する。Phase 5への着手はユーザーの
-  明示的な指示を待つ。
+- **Next task:** 本文書commitのGitHub Actions（4環境）を確認する。Phase 5への着手は、ユーザーの
+  明示的な指示と、Phase 4→5移行に関する監査役A・Bの（必要なら再）GOを待つ。
 - **Do not start:** Phase 5以降のTF/motif機能には着手しない。既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。

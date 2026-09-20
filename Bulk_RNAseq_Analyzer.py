@@ -1870,7 +1870,9 @@ def _render_atac_dar_table_controls(uploaded_file, separator, lang):
         on_change=reset_atac_results,
     ).strip()
     st.caption(ui("Enter the exact DAR contrast labels. BRIM does not infer direction from a file name or reverse log2FC.", lang,
-                  "DARのcontrastラベルを正確に入力してください。BRIMはファイル名から方向を推測せず、log2FCを反転しません。"))
+                  "DARのcontrastラベルを正確に入力してください。BRIMはファイル名から方向を推測せず、log2FCを反転しません。"
+                  "ラベルは入力どおりに扱われます。reference/testを取り違えると増減が逆に解釈されますが、"
+                  "データからは検出できません。元のDAR表・DEGの比較方向を確認してください。"))
     if st.button(ui("Validate DAR table", lang, "DAR表を検証"), key="atac_validate_dar"):
         if not reference or not test or reference == test:
             st.error(ui("Reference and test conditions must be non-empty and different.", lang,

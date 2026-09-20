@@ -16,7 +16,9 @@ user-provided peak--gene mapping、unmapped peak表、DAR/annotationの記述的
 
 Phase 4では`Multi-omics`内の`Integration`サブタブで、RNAのDEGとATACのDARを遺伝子単位で
 突き合わせます（レベル1）。RNAとATACのcontrast（reference/test）は明示指定が必須で、
-未指定または不一致の場合は実行できません。gene-summary quadrant（除外理由の内訳つき）、
+未指定または不一致の場合は実行できません。ラベルは入力どおりに扱われるため、reference/testを
+取り違えると増減が逆に解釈されますが、データからは検出できません。元のDAR表・DEGの比較方向を確認してください。
+gene-summary quadrant（除外理由の内訳つき）、
 evidence table、class別のローカルORAを提供し、結果は共有manifestとExport ZIPへ記録されます。
 出力は「一致（concordant）」「不一致（discordant）」などの記述であり、因果関係を示すものではありません。
 RNAとATACのpadjは結合せず、ORAのpadjは新しい独立した検定です。TF/motif解析（レベル2/3）は未実装です。
