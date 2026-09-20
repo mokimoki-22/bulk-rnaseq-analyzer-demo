@@ -9,7 +9,7 @@
 この節を、PCやCodexを切り替えて作業を再開するときの唯一の現在地とする。
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
-- **Current phase:** Phase 5 — TF候補推定（Level 2）（実装中、2026-09-20着手）
+- **Current phase:** Phase 5 完了（2026-09-21）。次はPhase 6（motifインポート、Level 3）で、下記のgateが未通過のため未着手
 - **Status:** Phase 4完了（2026-09-20）。commit `d2674ec`のGitHub Actions（run `35507389636`、
   Ubuntu/Windows × Python 3.11/3.12の4環境）は成功。監査役A・Bの指摘（ORA背景遺伝子の
   定義・件数の表示、`mixed_accessibility`の方向非依存ラベル、README/CHANGELOG/PLANの整合、
@@ -49,17 +49,30 @@
   API不一致（Phase 5起因ではない）。陰性対照は固定seed 0で期待どおり（調整なし）。Level 3/motif、新規ネットワーク通信・
   依存関係、RNA-only workflowの変更はない。
 - **Phase 5 CI status:** 実装commit `dabbb32` のrun `35518519244` は、Ubuntu 3.11/3.12とWindows 3.11が成功、
-  **Windows 3.12が失敗**（失敗時のログはサインインが必要で私は閲覧できず、原因は未確認）。同runの所要時間は従来の約8分から
-  33〜57分に増えた（追加したAppTestが遅い）ため、時間切れ（AppTestの既定60秒）の疑いが強いが未確認。対応として、
-  AppTestのタイムアウトを300秒にし、Level 1をボタン操作で作る回数を1回に減らした（実行時間を約4割短縮）。
-  監査役Aの指摘（manifestの`min_targets`/`alpha`を集合ごとに記録、PLANの書式）も同commitで是正する。
-  是正commitの4環境CI成功と、A・Bの再監査GOまでPhase 5は完了としない。
-- **Next task:** 計画書§7のステップ8: 本commitのGitHub Actions（4環境）を確認し、監査役A・Bの実装後監査を受ける。
-  両者GOの後にのみPhase 5を完了とする。
-- **Do not start:** Phase 6（motif/Level 3の操作・BED出力・取り込み）。計画書§1「追加しないもの」の全項目。
+  **Windows 3.12が失敗**した。失敗時のログはGitHubへのサインインが必要で閲覧できず、失敗したテストと原因は未確認のまま。
+  同runの所要時間は従来の約8分から33〜57分に増えており（追加したAppTestが遅い）、AppTestの既定タイムアウト60秒を超えた
+  疑いがあるが、確認していない。是正commit `9f4142d`（AppTestのタイムアウト300秒、Level 1のボタン実行を1回にして
+  約4割短縮、監査役Aの指摘の是正）のrun `35522031618` は4環境すべて成功（22.5〜36.8分）。**残る不確実性:**
+  `dabbb32`の失敗の原因は不明で、成功は1回分の標本である。300秒に広げたタイムアウトは本当のハングを隠し得る。
+  次のいずれかで解消できる（必須ではない）: Windowsジョブの再実行を重ねて安定性を確認する、または`dabbb32`のログを
+  サイン済みのUIで確認して失敗したテストを特定する。
+- **Phase 5 completion audit:** 監査役A・Bとも、commit `9f4142d` に対する実装後監査でGO（2026-09-21）。
+  Aは設計・科学的整合性・不変条件（I-1〜I-6）・決定D1〜D9への適合を確認し、B（実装・検証証拠）はテスト
+  （Phase 5関連94件成功）、既存テストの弱体化がないこと、モジュール境界、CI証拠を確認した。Bは`dabbb32`の失敗を
+  「原因不明の残余リスク」として明記したうえでGOとした。全体テストはローカルで184件成功、9件は既知のPyDESeq2 API不一致。
+- **Phase 5 verification scope:** 検証は決定的な合成データ（仕込みTFと陰性対照、固定seed 0）で行った。実データでの
+  検証ではなく、生物学的な妥当性を示すものではない。
+- **OPEN QUESTIONS（ユーザーへ、非ブロッカー）:** AGENTS.md I-1.5に、設計書§12.2の明確化（Level 2の背景遺伝子の定義）への
+  参照を1行追記するか。監査役Cは不変条件本文を編集できない。「追記しない」場合は設計書§12.2の注記とA・BのGOが正となる。
+  残存事項: DAR contrastのラベルは利用者入力で、入力誤りは検出できない（未指定・不一致は実行を拒否する）。ORA結果CSVは
+  同一class再実行で最新に置き換わる（履歴は追記）。
+- **Phase 6 gate（未通過）:** Phase 6（motif/Level 3、外部motif結果のインポート）に着手するには、AGENTS.mdの
+  Phase transition audit gateに従い、Phase 5→6移行について監査役A・BのGOを得たうえで、監査役Cが計画の決定と着手を
+  記録する。Phase 6の計画書（`docs/phase6_implementation_plan.md`）はまだ存在しない。
+- **Next task:** Phase 5→6の移行監査を依頼する（計画のみ）。その前に、Windowsジョブの安定性確認（任意）を行うとよい。
+- **Do not start:** Phase 6の実装（motif/Level 3の操作・BED出力・インポート）。上記gateが記録されるまで着手しない。
   不変条件I-1〜I-6の変更・放棄、新規ネットワーク通信・依存関係、RNA-only workflowの変更（I-6.1）、
   既存テストの変更・削除。
-
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
 ただし、GitHub ActionsのUbuntu/Windows × Python 3.11/3.12の4環境すべてで
@@ -357,8 +370,8 @@ BRIM sample RNAとsample ATACから一連の解析・出力が完了する。
 
 ## Phase 5: TF候補推定（レベル2）
 
-**状態:** 計画済み・実装未着手（監査役Cの決定を`docs/phase5_implementation_plan.md`に記録、2026-09-20）。
-監査役A・Bの計画レビューGOと監査役Cの着手決定の記録を待つ。
+**状態:** 完了（2026-09-21）— 監査役A・Bが実装後監査でGO（commit `9f4142d`、run `35522031618` の4環境CI成功）。
+合成データでの検証であり、生物学的検証ではない。`dabbb32`のWindows 3.12のCI失敗は原因不明の残余リスクとして記録。
 **設計書参照:** §6.4, §8.5, §12.1–12.3, §14.3
 
 **作業**

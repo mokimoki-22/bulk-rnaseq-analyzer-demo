@@ -1,6 +1,6 @@
 # Phase 5 TF候補推定（Level 2）実装計画
 
-- 状態: **実装中**（2026-09-20着手）。監査役A・Bの計画レビューGOと監査役Cの着手決定をPLAN.mdに記録済み。
+- 状態: **実装完了**（2026-09-21）。監査役A・Bが実装後監査でGO（commit `9f4142d`）。PLAN.mdに記録済み。
 - 決定者: 監査役C（AGENTS.md「Planning decision authority」、ユーザー常設委任 2026-09-20）
 - 前提: Phase 4完了（A/B GO、`924b31d`の4環境CI成功）。移行監査でAは計画のみGO・実装
   CONDITIONAL NO-GO、Bは同条件のCONDITIONAL NO-GO。条件は、Cの決定を本書とPLAN.mdへ記録し、
