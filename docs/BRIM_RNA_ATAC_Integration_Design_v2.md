@@ -336,6 +336,18 @@ shared geneが0件なら統合を停止する。1件以上なら実行可能と�
 
 ただし段階開示は後続機能の存在に気づかれにくいため、レベル1実行前にタブ冒頭で3段階の存在を1行で示す。
 
+#### Phase 4 Level 1表示の決定（監査役C、2026-09-20）
+
+quadrantの既定単位はgene summaryとする。RNA/ATACのいずれかが未検定、ATAC座標がない、
+または`mixed_accessibility`のgeneは補完済みの0/1を点として描かず、理由別件数と表で示す。
+edge表示では検定済みedgeを切替表示できるが、一対多の重複を明示する。captionには分析単位、
+4閾値、総件数、描画件数、除外理由別件数を含める。discordant群はconcordant群と同等に表示する。
+
+class別KEGG/GO ORAは重複を除いたgene summaryで実行する。backgroundはRNA検定済みかつ
+少なくとも1本のATAC検定済みmapped peakを持つgene（`not_significant`を含む）とし、
+not-tested、unmapped、`rna_only_no_mapped_peak`はinput/backgroundから除外する。ORA padjは
+RNA/ATAC padjの続きでも統合値でもない新規検定として明示し、因果表現を用いない。
+
 ### 6.4 レベル2のテーブル表示
 
 レベル2の中心は次のテーブルである。motif列は最初から表示し、未実行であることを明示する。

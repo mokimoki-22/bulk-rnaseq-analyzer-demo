@@ -34,8 +34,9 @@
 - **Phase 3 audit status:** Cの判断を文書化済み。実装に対する監査役A・Bの最終GOと、
   `e43801f`の4環境CI成功を取得済み。
 - **OPEN QUESTIONS:** なし。
-- **Next task:** ユーザーが明示承認した場合のみ、Phase 4への移行計画と独立監査役A・Bの
-  phase-transition判断を行う。承認前にPhase 4の実装へ着手しない。
+- **Next task:** ユーザー承認済み。監査役CのPhase 4表示・ORA判断を
+  `docs/phase4_implementation_plan.md`と設計書§6.3へ記録し、独立監査役A・Bの
+  phase-transition GOを得る。GO前にPhase 4を実装しない。
 - **Do not start:** Phase 4以降のUI・export・enrichment・TF/motif機能には着手しない。
   既存RNA-only workflowを変更しない。
 
