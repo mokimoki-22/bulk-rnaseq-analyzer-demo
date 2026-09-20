@@ -10,11 +10,11 @@
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
 - **Current phase:** Phase 2 — ATAC UI
-- **Status:** Phase 2進行中。監査是正（ATAC-only export/provenance、入力内容hashによる
-  無効化、設計書§6・§11のATAC UI残件、user mapping座標系の明示・変換記録）を実装し、
-  ローカル回帰テストで検証済み。
-- **Last implementation commit:** Phase 2監査是正（ATAC-only export/provenance、入力hash、
-  ATAC UI残件）。正確なcommit hashはGit履歴の最新実装commitを参照する。
+- **Status:** Phase 2完了。ATAC-only export/provenance、入力内容hashによる無効化、
+  設計書§6・§11のATAC UI残件、user mapping座標系の明示・変換記録を実装・検証し、
+  独立監査役A・BのGOを取得済み。
+- **Last implementation commit:** `c747f2e` — user-provided peak--gene mappingの明示座標系、
+  1-based変換、transform log/provenance記録と回帰テスト。
 - **Last verified CI:** GitHub Actions run `35479363917`、`4f68a82`、Ubuntu/Windows ×
   Python 3.11/3.12の4環境すべて成功。
 - **Completed remediation:** 1-based closedの単一塩基peak変換、座標transform logの
@@ -24,11 +24,11 @@
   Analysisの`padj_is_na`/`lfc_is_na`保持、ATAC入力原本SHA-256、ATAC-onlyの共有
   manifest/ZIP、user-provided peak--gene mappingの明示座標系・transform log、validation summary、unmapped peak表、
   設計書§11.1のATAC-only可視化と全図caption。
-- **Verification:** 監査是正のATAC UI/provenance/user mapping回帰テストがローカルで
-  成功。GitHub Actions run `35479363917`は4環境すべて成功。今回commitの4環境CIは
-  push後に確認する。
-- **Next task:** 今回commitの4環境CIが成功した後、監査役A・Bの独立GOを得るまでPhase 3には
-  着手しない。
+- **Verification:** 監査是正のATAC UI/provenance/user mapping回帰テストと既存RNA export
+  回帰テストがローカルで成功。GitHub Actions run `35479948941`（`c747f2e`）は
+  Ubuntu/Windows × Python 3.11/3.12の4環境すべて成功。監査役A・BはともにGO。
+- **Next task:** ユーザーが明示承認した場合のみ、Current phaseをPhase 3へ更新して
+  Phase 3の実装計画を確認する。承認前にPhase 3の実装へ着手しない。
 - **Do not start:** Phase 3以降には着手しない。Phase 2でも既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
