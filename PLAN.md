@@ -10,9 +10,9 @@
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
 - **Current phase:** Phase 3 — Integration core（Level 1）
-- **Status:** ユーザー承認によりPhase 3へ移行し、実装計画を確認中。Phase 2は完了し、
-  前Phase移行ゲートの独立監査役A・BのGOと4環境CI成功を取得済み。Phase 3実装は、
-  下記の監査上の未解決事項を設計として明文化し、両監査役がGOを更新するまで保留する。
+- **Status:** Phase 3 coreを実装中。Phase 2は完了し、前Phase移行ゲートの独立監査役A・Bの
+  GOと4環境CI成功を取得済み。Phase 3の設計判断を監査役Cが決定・文書化し、A・Bの
+  再監査GOを取得済み。
 - **Last implementation commit:** `c747f2e` — user-provided peak--gene mappingの明示座標系、
   1-based変換、transform log/provenance記録と回帰テスト。
 - **Last verified CI:** GitHub Actions run `35479948941`、`c747f2e`、Ubuntu/Windows ×
@@ -31,12 +31,12 @@
   非プログラマー向け運用性の判断担当）が決定した。双方未検定は`both_not_tested`、
   `lfc_is_na`は公開契約に保持、gene ID共有0件だけを停止し80%未満は強い警告として
   続行する。詳細は設計書§6.3・§8・§10と`docs/phase3_implementation_plan.md`を参照する。
-- **Phase 3 audit status:** Cの判断を文書化済み。監査役A・Bの再GOを待つ。
+- **Phase 3 audit status:** Cの判断を文書化済み。監査役A・Bの再GO（`4888041`）を取得済み。
 - **OPEN QUESTIONS:** なし。
-- **Next task:** 文書化した監査役Cの判断を監査役A・Bが再監査し、双方GOならPhase 3 coreを
-  実装する。
-- **Do not start:** Phase 3 coreの実装、Phase 4以降のUI・export・enrichment・TF/motif機能には
-  着手しない。既存RNA-only workflowを変更しない。
+- **Next task:** `brim_multiomics.py`と`tests/test_multiomics.py`、RNA側integration結果の
+  invalidationを実装し、Phase 3の範囲で検証する。
+- **Do not start:** Phase 4以降のUI・export・enrichment・TF/motif機能には着手しない。
+  既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。

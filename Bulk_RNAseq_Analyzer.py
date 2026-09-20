@@ -304,6 +304,7 @@ def reset_data_results():
     for key, default in _DATA_RESULT_DEFAULTS.items():
         st.session_state[key] = default.copy() if isinstance(default, (dict, list)) else default
     st.session_state["analysis_log"] = []
+    reset_integration_results()
 
 
 def reset_tf_integration_results():
@@ -372,6 +373,7 @@ def reset_contrast_results():
         "custom_gene_list",
     ):
         st.session_state[key] = [] if key == "custom_gene_list" else None
+    reset_integration_results()
 
 
 def reset_threshold_dependent_results():
