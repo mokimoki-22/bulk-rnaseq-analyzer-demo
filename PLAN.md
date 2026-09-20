@@ -75,7 +75,8 @@
   （`tests/test_tf_integration_ui.py`のLevel 3不在の確認）が「有効なテストの弱体化」に当たらないことを、A・Bが
   計画レビューで明示的に確認する（異議が出たらユーザーの判断を仰ぐ）。`cd0a2a4`（文書のみ）のCIは実行中で未確認。
 - **Next task:** `docs/phase6_implementation_plan.md`に対する監査役A・Bの計画レビュー。両者GOの後に、監査役Cが
-  着手を決定してこの節へ記録する。- **Do not start:** Phase 6の実装（motif/Level 3の操作・BED出力・インポート）。上記gateが記録されるまで着手しない。
+  着手を決定してこの節へ記録する。
+- **Do not start:** Phase 6の実装（motif/Level 3の操作・BED出力・インポート）。上記gateが記録されるまで着手しない。
   不変条件I-1〜I-6の変更・放棄、新規ネットワーク通信・依存関係、RNA-only workflowの変更（I-6.1）、
   既存テストの変更・削除。
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
