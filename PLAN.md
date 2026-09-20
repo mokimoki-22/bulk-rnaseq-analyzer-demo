@@ -1,8 +1,8 @@
 # PLAN.md — BRIM v2.0 実装計画
 
 - 対応設計書: `docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
-- 現在Phase: **Phase 4**
-- 最終更新: 2026-09-20
+- 現在Phase: **Phase 5 完了、Phase 6は計画レビュー中（実装未着手）**
+- 最終更新: 2026-09-21
 
 ## Current development status
 
