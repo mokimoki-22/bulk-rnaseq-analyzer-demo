@@ -10,12 +10,12 @@
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
 - **Current phase:** Phase 3 — Integration core（Level 1）
-- **Status:** Phase 3 coreを実装中。Phase 2は完了し、前Phase移行ゲートの独立監査役A・Bの
-  GOと4環境CI成功を取得済み。Phase 3の設計判断を監査役Cが決定・文書化し、A・Bの
-  再監査GOを取得済み。
-- **Last implementation commit:** `c747f2e` — user-provided peak--gene mappingの明示座標系、
-  1-based変換、transform log/provenance記録と回帰テスト。
-- **Last verified CI:** GitHub Actions run `35479948941`、`c747f2e`、Ubuntu/Windows ×
+- **Status:** Phase 3完了。Streamlit非依存のLevel 1 integration core、RNA起点の
+  integration invalidation、全分類・NA・compatibility・mixed accessibility・固定seed陰性対照を
+  実装し、監査役A・BのGOと4環境CI成功を取得済み。
+- **Last implementation commit:** `e43801f` — Phase 3 integration core、RNA invalidation、
+  unit/negative-control tests。
+- **Last verified CI:** GitHub Actions run `35482053565`、`e43801f`、Ubuntu/Windows ×
   Python 3.11/3.12の4環境すべて成功。
 - **Completed remediation:** 1-based closedの単一塩基peak変換、座標transform logの
   `read_dar_table()`および`run_dar()`への伝播、promoter境界・複数peak→同一gene・
@@ -31,10 +31,11 @@
   非プログラマー向け運用性の判断担当）が決定した。双方未検定は`both_not_tested`、
   `lfc_is_na`は公開契約に保持、gene ID共有0件だけを停止し80%未満は強い警告として
   続行する。詳細は設計書§6.3・§8・§10と`docs/phase3_implementation_plan.md`を参照する。
-- **Phase 3 audit status:** Cの判断を文書化済み。監査役A・Bの再GO（`4888041`）を取得済み。
+- **Phase 3 audit status:** Cの判断を文書化済み。実装に対する監査役A・Bの最終GOと、
+  `e43801f`の4環境CI成功を取得済み。
 - **OPEN QUESTIONS:** なし。
-- **Next task:** `brim_multiomics.py`と`tests/test_multiomics.py`、RNA側integration結果の
-  invalidationを実装し、Phase 3の範囲で検証する。
+- **Next task:** ユーザーが明示承認した場合のみ、Phase 4への移行計画と独立監査役A・Bの
+  phase-transition判断を行う。承認前にPhase 4の実装へ着手しない。
 - **Do not start:** Phase 4以降のUI・export・enrichment・TF/motif機能には着手しない。
   既存RNA-only workflowを変更しない。
 
@@ -271,7 +272,7 @@ RNA入力なしでATAC単独解析が完了する。
 
 ## Phase 3: Integration core（レベル1）
 
-**状態:** 未着手
+**状態:** 完了 — PASS（監査役A・BのGO、GitHub Actions 4環境成功、2026-09-20）
 **設計書参照:** §8.3–8.4, §10, §14.2
 
 **作業**
@@ -297,6 +298,14 @@ RNA入力なしでATAC単独解析が完了する。
 - RNAラベルをシャッフルすると分類の偏りが消失する
 
 ---
+
+**実装・検証記録（2026-09-20）**
+- `brim_multiomics.py` を追加し、明示gene ID契約、compatibility check、独立閾値による
+  edge分類、`both_not_tested`、gene summary、RNA-only gene、fixed-seed陰性対照を実装。
+- `Bulk_RNAseq_Analyzer.py`のRNA入力・contrast・threshold resetからintegration stateを
+  無効化し、ATAC入力を保持する回帰テストを追加。
+- `tests/test_multiomics.py` 6件成功。GitHub Actions run `35482053565`は
+  Ubuntu/Windows × Python 3.11/3.12の4環境すべて成功。
 
 ## Phase 4: Integration UI（レベル1）
 
