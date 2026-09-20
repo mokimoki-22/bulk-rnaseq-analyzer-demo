@@ -1,8 +1,9 @@
 """Reliable pathway enrichment helpers for BRIM.
 
-KEGG libraries bundled with BRIM are evaluated locally by GSEApy.  This keeps
-the custom count-matrix background and avoids depending on Enrichr/Speedrichr
-being available at analysis time.
+KEGG libraries bundled with BRIM are evaluated locally by GSEApy. Callers pass
+their explicit background: RNA-only workflows use the active count matrix,
+while Phase 4 integration ORA uses its tested-and-mapped gene-summary universe.
+This avoids depending on Enrichr/Speedrichr being available at analysis time.
 """
 
 from __future__ import annotations

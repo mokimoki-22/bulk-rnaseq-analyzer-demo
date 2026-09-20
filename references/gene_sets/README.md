@@ -15,6 +15,9 @@ conversion or an online fallback.
 Source endpoint:
 `https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=<library>`
 
-The statistical background remains the genes present in the active BRIM count
-matrix. GSEApy performs the local hypergeometric test and Benjamini-Hochberg
-multiple-testing correction.
+For existing RNA-only ORA/GSEA, the statistical background is the genes in the
+active BRIM count matrix. Phase 4 integration ORA has a separate, explicit
+background: RNA-tested gene summaries with at least one ATAC-tested mapped
+peak, including `not_significant`. It excludes not-tested, unmapped, and
+`rna_only_no_mapped_peak` genes. GSEApy performs the local hypergeometric test
+and Benjamini-Hochberg multiple-testing correction.
