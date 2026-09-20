@@ -241,7 +241,8 @@ def test_level2_controls_are_hidden_before_level1_and_shown_after_it():
     app.run()
     assert not app.exception
     assert not [b for b in app.button if b.key == "tf_level2_run"]
-    assert any("Level 3 (motif) is not available in this version" in text for text in _texts(app))
+    assert any("Level 3 (motif): after Level 2, import results from an external tool" in text for text in _texts(app))
+    assert not [b for b in app.button if (b.key or "").startswith("tf_level3_")]        # no Level 3 block before Level 2
     _level1_real(app)
     button = [b for b in app.button if b.key == "tf_level2_run"]
     assert len(button) == 1 and not button[0].disabled
@@ -249,6 +250,7 @@ def test_level2_controls_are_hidden_before_level1_and_shown_after_it():
     assert "Background size:" in texts and "neither all genes nor only the significant genes" in texts
     assert "literal count" in texts and "Level 2 has not been run for this gene set." in texts
     assert not [b for b in app.button if "motif" in (b.key or "").lower()]
+    assert not [b for b in app.button if (b.key or "").startswith("tf_level3_")]        # Level 3 also waits for a Level 2 result
 
 
 def test_level2_run_shows_separate_axes_not_run_motif_and_permanent_limitations():
@@ -390,7 +392,7 @@ def test_level2_text_has_no_causal_wording_in_english_and_shows_japanese_limitat
         assert not _CAUSAL.search(text.replace(_NEGATED, "")), text
     japanese = _level2(_level1(_tf_app(language="日本語")))
     joined = " ".join(_texts(japanese))
-    assert "限界" in joined and "レベル3（motif）はこの版では利用できません" in joined
+    assert "限界" in joined and "レベル3（motif）: レベル2の後に、外部ツールの結果を取り込みます" in joined
     assert "背景遺伝子数" in joined and "TF Activity" in joined or "支持軸数" in joined
     assert "制御する" not in joined.replace("これらの遺伝子を制御する、あるいは表現型を引き起こすことを示す根拠ではありません", "")
 

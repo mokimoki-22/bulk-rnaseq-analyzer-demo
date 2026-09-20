@@ -2121,23 +2121,46 @@ def _current_motif_state(genes):
         return None, None, "peakset"
     return source, brim_motif_import.keep_current_imports(state, fingerprint), None
 
-def _tf_level2_display_table(table, lang):
-    """Prepare the Level 2 table for display: separate axes, "not run" markers, no combined score."""
+
+def _tf_level2_display_table(table, lang, motif=None):
+    """Prepare the Level 2 table for display: separate axes, "not run" markers, no combined score.
+
+    ``motif`` is None (the Level 2 table as stored, the motif column reads "not run") or a dict with ``imports``,
+    ``source_prepared`` and ``alpha`` (the motif columns of the joined view, one set per peak set).  The supported-axis
+    count is the Level 2 count either way; the motif result never enters it.
+    """
     shown = table.copy()
     not_run = ui("not run", lang, "未実行")
-    for column in ("tf_activity_status", "motif_status"):
-        shown[column] = shown[column].replace({"not_run": not_run})
-    shown["supported / evaluable axes"] = (
-        shown["n_axes_supported"].astype(str) + " / " + shown["n_axes_evaluable"].astype(str)
-    )
     columns = [
         "tf_symbol", "supported / evaluable axes",
         "n_targets_in_set", "n_targets_in_universe", "fold_enrichment", "target_enrichment_p",
         "target_enrichment_padj",
         "tf_expression_status", "tf_rna_log2FoldChange", "tf_rna_padj",
         "tf_activity_status", "tf_activity_score",
-        "motif_status",
     ]
+    if motif is None:
+        columns.append("motif_status")
+    else:
+        shown = brim_motif_import.attach_motif_enrichment(
+            shown, motif["imports"], brim_motif_import.PEAK_SETS, motif["alpha"], motif["source_prepared"]
+        )
+        for peak_set in brim_motif_import.PEAK_SETS:
+            prefix = f"motif_{peak_set}_"
+            mismatch = shown[prefix + "threshold_matches_current"].eq(False).fillna(False).astype(bool)
+            other_background = shown[prefix + "background_differs_from_brim"].eq(True).fillna(False).astype(bool)
+            shown[prefix + "note"] = [
+                ", ".join(text for text, on in ((ui("threshold mismatch", lang, "閾値不一致"), bool(m)),
+                                                (ui("other background", lang, "別の背景"), bool(o))) if on)
+                for m, o in zip(mismatch, other_background)
+            ]
+            columns += [prefix + name for name in ("status", "padj", "motif_name", "match_status", "form", "note")]
+    for column in ("tf_activity_status", "motif_status") + tuple(
+            f"motif_{p}_status" for p in brim_motif_import.PEAK_SETS):
+        if column in shown.columns:
+            shown[column] = shown[column].replace({"not_run": not_run})
+    shown["supported / evaluable axes"] = (
+        shown["n_axes_supported"].astype(str) + " / " + shown["n_axes_evaluable"].astype(str)
+    )
     return shown.loc[:, columns]
 
 
@@ -2227,8 +2250,11 @@ def _render_tf_level2_ui(genes, edges, lang):
             except (brim_multiomics.IntegrationError, ValueError) as error:
                 st.error(str(error))
     runs, _ = _current_tf_level2_runs(genes)
+    motif_source, motif_state, _motif_reason = _current_motif_state(genes)
+    motif_imports = (motif_state or {}).get("imports", {})
     st.markdown("**" + ui("Limitations", lang, "限界") + "**")
     limits = brim_tf_integration.LIMITATIONS_JA if lang == "ja" else brim_tf_integration.LIMITATIONS_EN
+    limits = brim_motif_import.level2_limitations_for_display(limits, bool(motif_imports))
     st.markdown("\n".join(f"- {sentence}" for sentence in limits))
     run = (runs or {}).get(set_name)
     if run is None:
@@ -2250,13 +2276,19 @@ def _render_tf_level2_ui(genes, edges, lang):
         f"検定数: {run['n_tests']}; ターゲット数が下限未満で検定しなかったTF: {run['n_tfs_below_min_targets']}; "
         f"集合の遺伝子数: {run['gene_set']['n_genes']}（背景外で除いた数: {run['gene_set']['n_removed_outside_universe']}）。",
     ))
+    if motif_imports:
+        motif_note = ui("The motif columns come from the result you imported in Level 3 (below); they are not counted in "
+                        "the supported axes.", lang,
+                        "motif列は、下のレベル3で取り込んだ結果です。支持軸数には数えません。")
+    else:
+        motif_note = ui("Motif enrichment: not run (Level 3, below, imports motif results from an external tool).", lang,
+                        "motif濃縮: 未実行（下のレベル3で、外部ツールのmotif結果を取り込めます）。")
     st.caption(ui(
         "Activity 'separated_up/separated_down' is a descriptive rule without a p-value; about 10% of null TFs pass it "
-        "with 3 vs 3 samples. Motif enrichment: not run (Level 3 is not available in this version). "
-        "The number of supported axes is a sorting aid, not a statistic.", lang,
-        "activityの「separated_up/separated_down」はp値を伴わない記述的な規則で、3 vs 3では帰無のTFの約10%が通過します。"
-        "motif濃縮: 未実行（レベル3はこの版では利用できません）。支持軸数は並べ替えの補助であり、統計量ではありません。",
-    ))
+        "with 3 vs 3 samples. ", lang,
+        "activityの「separated_up/separated_down」はp値を伴わない記述的な規則で、3 vs 3では帰無のTFの約10%が通過します。",
+    ) + motif_note + " " + ui("The number of supported axes is a sorting aid, not a statistic.", lang,
+                              "支持軸数は並べ替えの補助であり、統計量ではありません。"))
     table = run["table"]
     st.caption(ui(
         "How to read the table: expression status — supported_up/supported_down = tested and past the RNA "
@@ -2271,7 +2303,11 @@ def _render_tf_level2_ui(genes, edges, lang):
         "基準群の全サンプルより高い/低い; not_separated = 群が重なる; not_estimated = 使えるスコアがない; "
         "insufficient_samples = いずれかの群が3サンプル未満; 未実行 = TF Activityを実行していない。",
     ))
-    st.dataframe(_tf_level2_display_table(table, lang), use_container_width=True)
+    motif_view = None
+    if motif_source is not None:
+        motif_view = {"imports": motif_imports, "source_prepared": True,
+                      "alpha": float(st.session_state.get("tf_level3_alpha", 0.05))}
+    st.dataframe(_tf_level2_display_table(table, lang, motif_view), use_container_width=True)
     if table.empty:
         return
     tf_symbol = st.selectbox(ui("TF drill-down", lang, "TFの詳細"), list(table["tf_symbol"]), key="tf_level2_drill_tf")
@@ -2282,17 +2318,252 @@ def _render_tf_level2_ui(genes, edges, lang):
     )
 
 
+def _motif_zip_bytes(bundle):
+    """The MotifAnalysis files as one ZIP (built in memory; nothing is written to disk)."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path, text in bundle.items():
+            archive.writestr(path, text)
+    return buffer.getvalue()
+
+
+def _motif_reference_symbols(organism):
+    """Gene symbols a motif's TF can be matched to: the RNA symbols and the CollecTRI TFs."""
+    rna = brim_multiomics.standardize_rna_results(st.session_state["deg_results"], "gene_symbol")
+    return set(rna["gene_key"].astype(str)) | set(load_collectri_network(organism)["source"].astype(str))
+
+
+def _store_tf_level3_provenance():
+    """Refresh the tf_level3 provenance copy from the stored preparation and imports (its single source)."""
+    source = st.session_state.get("integration_motif_source")
+    provenance = dict(st.session_state.get("integration_provenance") or {})
+    if source is None:
+        provenance.pop("tf_level3", None)
+    else:
+        provenance["tf_level3"] = brim_motif_import.build_motif_summary(
+            source, st.session_state.get("integration_motif_results"))
+    st.session_state["integration_provenance"] = provenance
+
+
+def _render_motif_import_form(peak_sets, settings, lang):
+    """The result-import controls (a thin wrapper: the work is done by brim_motif_import.import_uploaded_result)."""
+    st.markdown("**" + ui("2. Import the result", lang, "2. 結果を取り込む") + "**")
+    peak_set = st.selectbox(ui("Peak set the result was calculated from", lang, "結果の計算に使ったpeak集合"),
+                            list(brim_motif_import.PEAK_SETS), key="tf_level3_peak_set")
+    tool = st.radio(ui("Result format", lang, "結果の形式"), ["homer_known", "generic"], horizontal=True,
+                    key="tf_level3_tool",
+                    format_func=lambda value: "HOMER knownResults.txt" if value == "homer_known"
+                    else ui("Other CSV/TSV (choose the columns)", lang, "その他のCSV/TSV（列を選択）"))
+    upload = st.file_uploader(ui("Motif result file", lang, "motif結果ファイル"), type=["txt", "tsv", "csv"],
+                              key="tf_level3_file")
+    column_map = None
+    if tool == "generic" and upload is not None:
+        try:
+            columns = brim_motif_import.motif_file_columns(upload.getvalue())
+        except brim_motif_import.MotifImportError as error:
+            st.error(str(error))
+            columns = []
+        suggestion = brim_motif_import.suggest_column_map(columns)
+        column_map = {}
+        for key, label in (("motif_name", ui("Motif name column (required)", lang, "motif名の列（必須）")),
+                           ("padj", ui("Adjusted p-value column", lang, "調整済みp値の列")),
+                           ("pvalue", ui("p-value column", lang, "p値の列")),
+                           ("enrichment_score", ui("Enrichment score column (optional)", lang, "濃縮スコアの列（任意）")),
+                           ("peak_set", ui("Peak set column (optional)", lang, "peak集合の列（任意）"))):
+            options = [""] + columns
+            index = options.index(suggestion[key]) if suggestion.get(key) in options else 0
+            chosen = st.selectbox(label, options, index=index, key=f"tf_level3_map_{key}")
+            if chosen:
+                column_map[key] = chosen
+    analysis_source = st.radio(
+        ui("Which files was the tool run on?", lang, "ツールを実行したファイル"), list(brim_motif_import.ANALYSIS_SOURCES),
+        horizontal=True, key="tf_level3_analysis_source",
+        format_func=lambda value: ui("The BED files BRIM wrote", lang, "BRIMが書き出したBEDファイル")
+        if value == "brim_generated" else ui("Another file", lang, "別のファイル"))
+    declared = None
+    if analysis_source == "other_file":
+        st.caption(ui("Enter the thresholds used for that file (they are not prefilled, so a difference can be detected).",
+                      lang, "そのファイルに使った閾値を入力してください（食い違いを検出できるよう、初期値は入れていません）。"))
+        columns_row = st.columns(2)
+        declared_padj = columns_row[0].text_input(ui("ATAC padj threshold used", lang, "使ったATAC padj閾値"),
+                                                  key="tf_level3_declared_padj")
+        declared_lfc = columns_row[1].text_input(ui("ATAC |log2FC| threshold used", lang, "使ったATAC |log2FC|閾値"),
+                                                 key="tf_level3_declared_lfc")
+        declared = (declared_padj, declared_lfc)
+    background = st.selectbox(
+        ui("Background used by the tool", lang, "ツールが使った背景"), list(brim_motif_import.BACKGROUND_CHOICES),
+        key="tf_level3_background",
+        format_func=lambda value: {"brim_all_tested_peaks": ui("BRIM's all-tested-peaks background", lang, "BRIMの検定済み全peak背景"),
+                                   "tool_default": ui("The tool's default background", lang, "ツール既定の背景"),
+                                   "other": ui("Another background (describe it)", lang, "別の背景（説明を入力）")}[value])
+    description = st.text_input(ui("Describe the background", lang, "背景の説明"), key="tf_level3_background_description") \
+        if background == "other" else ""
+    version_row = st.columns(2)
+    tool_version = version_row[0].text_input(ui("Tool version (optional)", lang, "ツールの版（任意）"), key="tf_level3_tool_version")
+    database = version_row[1].text_input(ui("Motif database (optional)", lang, "motifデータベース（任意）"), key="tf_level3_database")
+    attested = st.checkbox(ui("The peak coordinates and the external tool's genome are the same build ({build}).", lang,
+                              "peak座標と外部ツールのgenomeは同じbuild（{build}）です。", build=peak_sets.genome_build),
+                           key="tf_level3_genome_attested")
+    if st.button(ui("Import the motif result", lang, "motif結果を取り込む"), key="tf_level3_import"):
+        if upload is None:
+            st.error(ui("Choose a result file first.", lang, "先に結果ファイルを選択してください。"))
+            return
+        try:
+            declaration = {"analysis_source": analysis_source, "genome_attested": attested, "background_choice": background,
+                           "background_description": description, "tool_version": tool_version, "motif_database": database}
+            if declared is not None:
+                try:
+                    declaration["declared_thresholds"] = {"atac_padj": float(declared[0]), "atac_lfc": float(declared[1])}
+                except ValueError as error:
+                    raise brim_motif_import.MotifImportError("Enter numbers for both thresholds.") from error
+            organism = "human" if settings["species"] == "Human" else "mouse"
+            new_state = brim_motif_import.import_uploaded_result(
+                st.session_state.get("integration_motif_results"), peak_sets, upload.getvalue(), upload.name, tool,
+                column_map, peak_set, declaration, _motif_reference_symbols(organism),
+                datetime.datetime.now().isoformat(timespec="seconds"))
+            st.session_state["integration_motif_results"] = new_state
+            _store_tf_level3_provenance()
+            log_analysis("Level 3 motif import", f"Peak set: {peak_set}; result imported from an external tool.")
+            st.toast(ui("The motif result was imported.", lang, "motif結果を取り込みました。"))
+        except (brim_motif_import.MotifImportError, ValueError) as error:
+            st.error(str(error))
+            return
+        st.rerun()          # the Level 2 table above was drawn before this change; draw everything again
+
+
+def _render_tf_level3_ui(genes, lang):
+    """Level 3 (Phase 6): prepare BED files, show the command, import an external motif result. BRIM runs no tool."""
+    runs, _ = _current_tf_level2_runs(genes)
+    if not runs:
+        return
+    settings = st.session_state["integration_settings"]
+    dar = st.session_state.get("atac_results")
+    if dar is None:
+        return
+    st.divider()
+    st.subheader(ui("Level 3: motif results from an external tool", lang, "レベル3: 外部ツールのmotif結果"))
+    st.caption(ui(
+        "BRIM does not scan sequences or run any tool. It writes BED files, shows a command you can run yourself outside "
+        "BRIM, and imports the result you obtain.", lang,
+        "BRIMは配列のスキャンも外部ツールの実行もしません。BEDファイルを書き出し、BRIMの外で実行できるコマンドを示し、"
+        "得られた結果を取り込みます。"))
+    _source, _state, reason = _current_motif_state(genes)
+    if reason in ("peakset", "level2"):
+        reset_motif_results()
+        st.warning(ui("Level 3 results were cleared because the ATAC peak sets or the Level 2 result changed; prepare the "
+                      "files and import again.", lang,
+                      "ATACのpeak集合またはレベル2の結果が変わったため、レベル3の結果を消去しました。"
+                      "ファイルを準備し直して、再度取り込んでください。"))
+    try:
+        peak_sets = brim_motif_import.build_peak_sets(dar, settings["thresholds"], settings["genome_build"], settings["species"])
+    except brim_motif_import.MotifImportError as error:
+        st.error(str(error))
+        return
+    counts = peak_sets.counts
+    st.markdown("**" + ui("1. Prepare the files", lang, "1. ファイルを準備する") + "**")
+    st.caption(ui(
+        f"{brim_motif_import.BACKGROUND_DEFINITION} Background peaks: {counts['n_background']}; opening: {counts['n_opening']}; "
+        f"closing: {counts['n_closing']}; not tested and excluded: {counts['n_not_tested_excluded']}. "
+        f"{brim_motif_import.THRESHOLD_SOURCE_NOTE}", lang,
+        f"{brim_motif_import.BACKGROUND_DEFINITION_JA} 背景peak数: {counts['n_background']}; opening: {counts['n_opening']}; "
+        f"closing: {counts['n_closing']}; 未検定で除外: {counts['n_not_tested_excluded']}。"
+        f"{brim_motif_import.THRESHOLD_SOURCE_NOTE_JA}"))
+    for warning in peak_sets.warnings:
+        st.warning(ui(warning["message"], lang, warning["message_ja"]))
+    if st.button(ui("Prepare the motif analysis files", lang, "motif解析用ファイルを準備"), key="tf_level3_prepare"):
+        generated_at = datetime.datetime.now().isoformat(timespec="seconds")
+        bundle = brim_motif_import.build_motif_bundle(peak_sets, APP_VERSION, generated_at)
+        st.session_state["integration_motif_source"] = brim_motif_import.prepared_source_record(
+            peak_sets, bundle, generated_at, APP_VERSION)
+        st.session_state["integration_motif_results"] = brim_motif_import.keep_current_imports(
+            st.session_state.get("integration_motif_results"), peak_sets.peakset_fingerprint)
+        _store_tf_level3_provenance()
+        log_analysis("Level 3 motif files", "Prepared BED files; BRIM ran no external tool.")
+        st.rerun()          # the Level 2 table above was drawn before this change; draw everything again
+    source = st.session_state.get("integration_motif_source")
+    if source is None:
+        return
+    bundle = brim_motif_import.build_motif_bundle(peak_sets, source["app_version"], source["generated_at"])
+    st.download_button(ui("Download the motif analysis files (ZIP)", lang, "motif解析用ファイルをダウンロード（ZIP）"),
+                       _motif_zip_bytes(bundle), "MotifAnalysis.zip", "application/zip", key="tf_level3_download")
+    commands = brim_motif_import.build_homer_commands(peak_sets)
+    if commands:
+        st.caption(ui("Run these commands outside BRIM (-size 200 is an example value). The first line is needed only if the "
+                      "genome is not installed yet and may download data.", lang,
+                      "次のコマンドをBRIMの外で実行してください（-size 200は例です）。1行目はgenomeが未導入の場合のみ必要で、"
+                      "データをダウンロードすることがあります。"))
+        st.code("\n".join(commands), language="bash")
+    else:
+        reason_info = brim_motif_import.homer_unavailable_reason(peak_sets)
+        st.info(ui(reason_info["message"], lang, reason_info["message_ja"]))
+    st.caption(ui("Steps: 1) prepare the external tool by its own documentation (HOMER usually needs WSL on Windows); "
+                  "2) put the BED files in one folder; 3) run the commands; 4) import knownResults.txt below, choosing "
+                  "opening or closing.", lang,
+                  "手順: 1) 外部ツールをそのツールの文書に従って用意（HOMERはWindowsでは通常WSLが必要）; 2) BEDファイルを"
+                  "1つのフォルダに置く; 3) コマンドを実行; 4) 下でknownResults.txtを、openingまたはclosingを選んで取り込む。"))
+    _render_motif_import_form(peak_sets, settings, lang)
+    imports = (st.session_state.get("integration_motif_results") or {}).get("imports", {})
+    st.markdown("**" + ui("3. Imported results", lang, "3. 取り込んだ結果") + "**")
+    alpha = st.selectbox(ui("Reported padj label threshold (display only)", lang, "報告padjの表示用の閾値（表示のみ）"),
+                         [0.01, 0.05, 0.1], index=1, key="tf_level3_alpha")
+    if not imports:
+        st.info(ui("No motif result has been imported yet.", lang, "motif結果はまだ取り込まれていません。"))
+    for peak_set in brim_motif_import.PEAK_SETS:
+        imported = imports.get(peak_set)
+        if imported is None:
+            continue
+        record = imported["record"]
+        badges = []
+        if record["threshold_matches_current"] is False:
+            badges.append(ui("threshold mismatch", lang, "閾値不一致"))
+        if record["background_differs_from_brim"]:
+            badges.append(ui("other background", lang, "別の背景"))
+        st.markdown(f"**{peak_set}** — {record['tool']} — {record['source_file']['file_name']}"
+                    + (" — ⚠ " + ", ".join(badges) if badges else ""))
+        for warning in record["warnings"]:
+            st.warning(ui(warning["message"], lang, warning["message_ja"]))
+        counts_r = record["counts"]
+        st.caption(ui(
+            f"Rows: {counts_r['n_rows']}; TFs: {counts_r['n_tfs']}; matched rows: {counts_r['n_rows_matched']}; partly "
+            f"matched: {counts_r['n_rows_partially_matched']}; unmatched: {counts_r['n_rows_unmatched']}. "
+            f"{brim_motif_import.SYMBOL_RULE_TEXT}", lang,
+            f"行数: {counts_r['n_rows']}; TF数: {counts_r['n_tfs']}; 照合できた行: {counts_r['n_rows_matched']}; 一部照合: "
+            f"{counts_r['n_rows_partially_matched']}; 未照合: {counts_r['n_rows_unmatched']}。"
+            f"{brim_motif_import.SYMBOL_RULE_TEXT_JA}"))
+        if imported["unmatched"]["unmatched"]:
+            with st.expander(ui("Motif names that could not be matched", lang, "照合できなかったmotif名")):
+                st.dataframe(pd.DataFrame(imported["unmatched"]["unmatched"]), use_container_width=True)
+        st.dataframe(imported["tf_table"], use_container_width=True)
+    if imports:
+        known = pd.concat([run["table"][["tf_symbol"]] for run in runs.values() if run.get("status") == "executed"
+                           and not run["table"].empty], ignore_index=True) if runs else pd.DataFrame({"tf_symbol": []})
+        only = brim_motif_import.motif_only_tfs(known, imports, brim_motif_import.PEAK_SETS, float(alpha))
+        if not only.empty:
+            st.markdown("**" + ui("TFs found only in the motif result", lang, "motif結果にだけあるTF") + "**")
+            st.dataframe(only, use_container_width=True)
+    st.markdown("**" + ui("Limitations", lang, "限界") + "**")
+    limits = brim_motif_import.LIMITATIONS_JA if lang == "ja" else brim_motif_import.LIMITATIONS_EN
+    st.markdown("\n".join(f"- {sentence}" for sentence in limits))
+
+
+def _render_tf_levels_ui(genes, edges, lang):
+    """Level 2, then Level 3 (which needs a current Level 2 result)."""
+    _render_tf_level2_ui(genes, edges, lang)
+    _render_tf_level3_ui(genes, lang)
+
+
 def _render_integration_ui(lang):
-    """Render the Phase 4 Level 1 and Phase 5 Level 2 integration controls and results."""
+    """Render the Phase 4 Level 1, Phase 5 Level 2 and Phase 6 Level 3 integration controls and results."""
     st.header(ui("RNA–ATAC integration (Level 1)", lang, "RNA–ATAC統合解析（レベル1）"))
     st.caption(ui(
         "Compare expression and accessibility evidence. This view does not establish causation.", lang,
         "発現とaccessibilityの根拠を比較します。この表示は因果関係を示すものではありません。",
     ))
     st.caption(ui(
-        "Level 1: RNA–ATAC comparison → Level 2: TF candidates (after Level 1). "
-        "Level 3 (motif) is not available in this version.", lang,
-        "レベル1: RNA–ATAC比較 → レベル2: TF候補（レベル1の後）。レベル3（motif）はこの版では利用できません。",
+        "Level 1: RNA–ATAC comparison → Level 2: TF candidates (after Level 1) → "
+        "Level 3 (motif): after Level 2, import results from an external tool.", lang,
+        "レベル1: RNA–ATAC比較 → レベル2: TF候補（レベル1の後）→ "
+        "レベル3（motif）: レベル2の後に、外部ツールの結果を取り込みます。",
     ))
     gene_id_type = st.radio(
         ui("RNA identifier used for matching", lang, "照合に使うRNA識別子"),
@@ -2409,7 +2680,7 @@ def _render_integration_ui(lang):
     available_classes = sorted(set(genes["integration_class"]).intersection(brim_integration_enrichment.ORA_CLASSES))
     if not available_classes:
         st.info(ui("No eligible Level 1 class is available for ORA.", lang, "ORA対象のレベル1classがありません。"))
-        _render_tf_level2_ui(genes, edges, lang)
+        _render_tf_levels_ui(genes, edges, lang)
         return
     ora_class = st.selectbox(ui("Integration class", lang, "統合class"), available_classes, key="integration_ora_class")
     if st.button(ui("Run local ORA", lang, "ローカルORAを実行"), key="integration_run_ora"):
@@ -2458,7 +2729,7 @@ def _render_integration_ui(lang):
                            f"{library_type}: ローカル経路との重複は見つかりませんでした。"))
             else:
                 st.info(ui(library_result["reason"], lang, library_result.get("reason_ja", library_result["reason"])))
-    _render_tf_level2_ui(genes, edges, lang)
+    _render_tf_levels_ui(genes, edges, lang)
 
 
 tab_upload, tab_deg, tab_multiomics, tab_viz, tab_network, tab_meta, tab_export, tab_info = st.tabs([

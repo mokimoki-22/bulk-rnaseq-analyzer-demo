@@ -777,3 +777,40 @@ def test_level3_texts_have_no_causal_wording_and_state_the_required_points():
     assert "does not show that the TF binds there" in joined and "does not correct, recompute or combine" in joined
     assert "not paired with Level 2 gene sets" in joined and "not in result" in joined and "sorting aid" in joined
     assert len(mi.LIMITATIONS_EN) == len(mi.LIMITATIONS_JA) == 8
+
+
+# ----------------------------------------------------------------------------------------------
+# Step 5: the upload handler's core (AppTest cannot drive file_uploader, so the wiring is kept thin and tested here)
+# ----------------------------------------------------------------------------------------------
+
+def test_the_header_columns_of_an_uploaded_file_are_offered_for_the_column_map():
+    data = generic_motif_csv().encode("utf-8")
+    assert mi.motif_file_columns(data) == ["motif", "q_value", "p_value", "peak_set"]
+    assert mi.motif_file_columns(homer_known_text().encode("utf-8"))[0] == "Motif Name"
+    with pytest.raises(mi.MotifImportError, match="empty"):
+        mi.motif_file_columns(b"")
+    with pytest.raises(mi.MotifImportError, match="limit"):
+        mi.motif_file_columns(b"a" * (mi.MAX_IMPORT_BYTES + 1))
+    with pytest.raises(mi.MotifImportError, match="de novo"):
+        mi.motif_file_columns(b">ATGC\tMotif\n")
+
+
+def test_the_upload_core_reads_binds_and_returns_a_new_state_without_touching_the_old_one():
+    peak_sets = _sets(synthetic_dar_table())
+    declaration = {**DECLARATION, "tool_version": "v1"}
+    first = mi.import_uploaded_result(None, peak_sets, homer_known_text().encode("utf-8"), "C:\\out\\knownResults.txt",
+                                      "homer_known", None, "opening", declaration, REFERENCE, "2026-09-21T00:00:00")
+    assert set(first["imports"]) == {"opening"} and first["history"][0]["peak_set"] == "opening"
+    assert first["imports"]["opening"]["record"]["source_file"]["file_name"] == "knownResults.txt"
+    second = mi.import_uploaded_result(first, peak_sets, generic_motif_csv().encode("utf-8"), "g.csv", "generic",
+                                       {"motif_name": "motif", "padj": "q_value", "pvalue": "p_value"}, "closing", declaration,
+                                       REFERENCE, "2026-09-21T00:00:01")
+    assert set(second["imports"]) == {"opening", "closing"} and len(second["history"]) == 2 and set(first["imports"]) == {"opening"}
+    for bad in (dict(declaration, genome_attested=False), dict(declaration, analysis_source=None)):
+        with pytest.raises(mi.MotifImportError):
+            mi.import_uploaded_result(first, peak_sets, homer_known_text().encode("utf-8"), "k.txt", "homer_known", None,
+                                      "opening", bad, REFERENCE, "t")
+    with pytest.raises(mi.MotifImportError, match="column map is required"):
+        mi.import_uploaded_result(first, peak_sets, generic_motif_csv().encode("utf-8"), "g.csv", "generic", None, "opening",
+                                  declaration, REFERENCE, "t")
+    assert set(first["imports"]) == {"opening"} and len(first["history"]) == 1                # a failed import changes nothing

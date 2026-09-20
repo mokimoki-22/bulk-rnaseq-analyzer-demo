@@ -1039,3 +1039,26 @@ def build_motif_export_files(bundle: Mapping[str, str] | None, source: Mapping[s
     if frames:
         files["Integration/tf_candidates_with_motif.csv"] = pd.concat(frames, ignore_index=True).to_csv(index=False)
     return files
+
+
+def motif_file_columns(data: bytes) -> list[str]:
+    """Return the header columns of an uploaded file, for the column-map choices (same validation as the import)."""
+    if not data:
+        raise MotifImportError("The file is empty.")
+    if len(data) > MAX_IMPORT_BYTES:
+        raise MotifImportError(f"The file is larger than the limit of {MAX_IMPORT_BYTES:,} bytes; import a smaller result.")
+    header, _rows, _delimiter, _skipped = _read_delimited(_decode(data)[0])
+    return header
+
+
+def import_uploaded_result(state: Mapping[str, Any] | None, peak_sets: PeakSets, data: bytes, file_name: str, tool: str,
+                           column_map: Mapping[str, str] | None, peak_set: str, declaration: Mapping[str, Any],
+                           reference_symbols, imported_at: str) -> dict[str, Any]:
+    """Read an uploaded result, bind it to a peak set and return the new import state (the thin upload handler's core).
+
+    Raises ``MotifImportError`` with an actionable message when the file or the declarations are not acceptable; the
+    previous state is never modified.
+    """
+    table = read_motif_results(data, file_name, tool, column_map)
+    imported = import_motif_result(table, peak_sets, peak_set, declaration, reference_symbols, imported_at)
+    return with_import(state, imported)
