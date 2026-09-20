@@ -97,7 +97,9 @@ def test_ora_export_keeps_each_same_class_execution_with_its_class_name(monkeypa
         assert species == "Human"
         return {
             "integration_class": integration_class, "species": species, "input_genes": ["G1"],
-            "background_genes": ["G1", "G2", "G3"], "warnings": [],
+            "background_genes": ["G1", "G2", "G3"], "background_size": 3,
+            "background_definition": "ORA background definition.", "background_definition_ja": "ORA背景の定義。",
+            "direction_note": None, "direction_note_ja": None, "warnings": [],
             "libraries": {"KEGG": {"status": "executed", "library": "KEGG_2021_Human",
                                     "result_count": 1, "results": pd.DataFrame({"Term": ["pathway"]})}},
             "history": [{"library_type": "KEGG", "status": "executed", "library": "KEGG_2021_Human", "result_count": 1}],
@@ -117,3 +119,4 @@ def test_ora_export_keeps_each_same_class_execution_with_its_class_name(monkeypa
     with zipfile.ZipFile(io.BytesIO(downloads["results.zip"])) as archive:
         export_history = json.loads(archive.read("Integration/ORA/history.json"))
     assert len(export_history) == 2 and all(item["integration_class"] == "concordant_activation" for item in export_history)
+    assert all(item["background_size"] == 3 and item["background_definition"] for item in export_history)

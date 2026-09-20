@@ -7,12 +7,26 @@ PyDESeq2による差次的発現解析、可視化、経路濃縮解析、TF act
 v1.1.0をRNA-onlyの基準線として固定し、`PLAN.md`に定義されたPhase順で
 RNA-seqとATAC-seqの統合機能を追加しています。Phase 1ではStreamlit非依存の
 ATAC core（count matrix / 解析済みDARの標準化、DAR推定、GENCODE TSSを使う
-promoter / nearest-TSS mapping）を提供します。UIはPhase 2で追加します。
+promoter / nearest-TSS mapping）を提供します。UIはPhase 2で追加し、
+RNA--ATAC統合（レベル1）はPhase 4で追加しました。
 
 Phase 2では`Multi-omics`内の`ATAC-seq`サブタブで、peak count matrixまたは解析済み
 DAR tableを単独解析できます。検証サマリー、明示的なannotation設定、任意の
 user-provided peak--gene mapping、unmapped peak表、DAR/annotationの記述的可視化を提供します。
-RNA--ATAC統合はまだ実装していません。
+
+Phase 4では`Multi-omics`内の`Integration`サブタブで、RNAのDEGとATACのDARを遺伝子単位で
+突き合わせます（レベル1）。RNAとATACのcontrast（reference/test）は明示指定が必須で、
+未指定または不一致の場合は実行できません。gene-summary quadrant（除外理由の内訳つき）、
+evidence table、class別のローカルORAを提供し、結果は共有manifestとExport ZIPへ記録されます。
+出力は「一致（concordant）」「不一致（discordant）」などの記述であり、因果関係を示すものではありません。
+RNAとATACのpadjは結合せず、ORAのpadjは新しい独立した検定です。TF/motif解析（レベル2/3）は未実装です。
+
+ORAの背景遺伝子は、RNAのpadjとlog2FCがともに検定済み（NAでない）で、検定済みATAC peakが
+1つ以上対応付いた遺伝子です。有意でない遺伝子も含みます（全遺伝子でも、有意な遺伝子のみでもありません）。
+背景の件数はUIと`Integration/ORA/history.json`に記録されます。ORAのgene setはローカル同梱のもので、
+Human GO/KEGGとMouse KEGGを利用できます。Mouse GOは同梱ライブラリがヒト遺伝子シンボル用のため
+未対応です。同じclassでORAを再実行しても、実行履歴は上書きされず追記されます
+（結果CSVは最新の実行で置き換わります）。
 
 user-provided mappingは、標準化済みDARの`peak_id`、または`chrom`/`start`/`end`列を受け付けます。
 座標列を使う場合は0-based half-openか1-based closedを明示選択し、必要な変換はprovenanceに記録されます。

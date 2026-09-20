@@ -40,6 +40,18 @@ def test_mouse_go_is_recorded_as_unavailable_without_calling_runner():
     assert "human gene symbols" in result["libraries"]["GO_BP"]["reason"]
 
 
+def test_ora_result_reports_background_definition_size_and_mixed_direction_note():
+    def runner(genes, library, background):
+        return pd.DataFrame({"Term": ["pathway"]})
+
+    result = enrichment.run_class_ora(_summary(), "concordant_activation", "Human", runner)
+    assert result["background_size"] == len(result["background_genes"]) == 3
+    assert "not-significant genes are included" in result["background_definition"]
+    assert result["background_definition_ja"] and result["direction_note"] is None
+    mixed = enrichment.run_class_ora(_summary(), "mixed_accessibility", "Human", runner)
+    assert "does not assume a single direction" in mixed["direction_note"] and mixed["direction_note_ja"]
+
+
 def test_zero_overlap_is_retained_as_an_executed_local_attempt():
     def no_overlap(genes, library, background):
         raise ValueError("No pathway overlaps were found for the selected genes.")

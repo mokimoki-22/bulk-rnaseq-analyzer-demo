@@ -32,6 +32,22 @@ _LIBRARIES = {
 }
 
 
+BACKGROUND_DEFINITION = (
+    "ORA background: genes with RNA padj and log2FC both tested (not NA) and at least one tested ATAC peak mapped; "
+    "not-significant genes are included. It is neither all genes nor only the significant genes."
+)
+BACKGROUND_DEFINITION_JA = (
+    "ORAの背景遺伝子: RNAのpadjとlog2FCがともに検定済み（NAでない）で、検定済みATAC peakが1つ以上対応付いた遺伝子。"
+    "有意でない遺伝子も含みます。全遺伝子でも、有意な遺伝子のみでもありません。"
+)
+DIRECTION_AGNOSTIC_NOTE = (
+    "mixed_accessibility contains genes with both opening and closing peaks; this ORA does not assume a single direction."
+)
+DIRECTION_AGNOSTIC_NOTE_JA = (
+    "mixed_accessibilityは開くpeakと閉じるpeakの両方を持つ遺伝子です。このORAは単一の方向を仮定しません。"
+)
+
+
 def _species_libraries(species: str) -> Mapping[str, Mapping[str, str]]:
     if species not in _LIBRARIES:
         raise IntegrationError("Integration enrichment species must be Human or Mouse.")
@@ -103,6 +119,11 @@ def run_class_ora(
         "species": species,
         "input_genes": genes,
         "background_genes": background,
+        "background_size": len(background),
+        "background_definition": BACKGROUND_DEFINITION,
+        "background_definition_ja": BACKGROUND_DEFINITION_JA,
+        "direction_note": DIRECTION_AGNOSTIC_NOTE if integration_class == "mixed_accessibility" else None,
+        "direction_note_ja": DIRECTION_AGNOSTIC_NOTE_JA if integration_class == "mixed_accessibility" else None,
         "warnings": warnings,
         "libraries": results,
         "history": history,

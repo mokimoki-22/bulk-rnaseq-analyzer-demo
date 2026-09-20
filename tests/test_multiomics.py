@@ -77,6 +77,10 @@ def test_ensembl_transform_duplicates_and_compatibility_contract():
     assert compatible.compatible and compatible.warnings and compatible.counts["n_shared_genes"] == 1
     assert not multi.check_integration_compatibility(base, {**atac, "gene_keys": ["Z"]}).compatible
     assert not multi.check_integration_compatibility(base, {**atac, "contrast": {"reference": "T", "test": "C"}}).compatible
+    for missing in (None, {}, {"reference": "C"}, {"reference": "C", "test": ""}, "T vs C"):
+        assert not multi.check_integration_compatibility(base, {**atac, "contrast": missing}).compatible
+        assert not multi.check_integration_compatibility({**base, "contrast": missing}, atac).compatible
+    assert not multi.check_integration_compatibility(base, {k: v for k, v in atac.items() if k != "contrast"}).compatible
 
 
 def _signal():

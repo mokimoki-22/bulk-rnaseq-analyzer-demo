@@ -2137,7 +2137,10 @@ def _render_integration_ui(lang):
             provenance = dict(st.session_state.get("integration_provenance") or {})
             execution = {
                 "integration_class": ora_class, "input_genes": ora_result["input_genes"],
-                "background_genes": ora_result["background_genes"], "warnings": ora_result["warnings"],
+                "background_genes": ora_result["background_genes"],
+                "background_size": ora_result["background_size"],
+                "background_definition": ora_result["background_definition"],
+                "direction_note": ora_result["direction_note"], "warnings": ora_result["warnings"],
                 "libraries": ora_result["history"],
             }
             provenance["ora_history"] = list(provenance.get("ora_history", [])) + [execution]
@@ -2151,6 +2154,14 @@ def _render_integration_ui(lang):
             st.warning(ui(warning, lang, "選択した遺伝子集合は20未満です。ORAは探索的に解釈してください。"))
         st.caption(ui(ora_result["independent_test_notice"], lang,
                       "ORAのpadjはRNA/ATACのpadjと結合しない、新しい独立した検定です。"))
+        st.caption(ui(
+            f"{ora_result['background_definition']} Background size: {ora_result['background_size']}; "
+            f"input genes: {len(ora_result['input_genes'])}.", lang,
+            f"{ora_result['background_definition_ja']} 背景遺伝子数: {ora_result['background_size']}; "
+            f"入力遺伝子数: {len(ora_result['input_genes'])}。",
+        ))
+        if ora_result.get("direction_note"):
+            st.info(ui(ora_result["direction_note"], lang, ora_result["direction_note_ja"]))
         for library_type, library_result in ora_result["libraries"].items():
             status = library_result["status"]
             if status == "executed":

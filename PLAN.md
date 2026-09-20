@@ -10,38 +10,29 @@
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
 - **Current phase:** Phase 4 — Integration UI（Level 1）
-- **Status:** 実装完了、commit/CI確認待ち。監査役A・BのGO後、Integration subtab、構造化
-  RNA/DAR contrast照合、gene-summary quadrant/evidence table、class別のlocal ORA、共有
-  export/provenance、UI回帰を実装した。Level 2/3のUI・処理・exportは追加していない。
-- **Last implementation commit:** `2c9acd1` — Phase 4 Level 1 integration UI、local ORA、
-  shared export/provenance、contrast/Mouse GO safeguards、回帰テスト。
-- **Last verified CI:** GitHub Actions run `35482053565`、`e43801f`、Ubuntu/Windows ×
-  Python 3.11/3.12の4環境すべて成功。
-- **Completed remediation:** 1-based closedの単一塩基peak変換、座標transform logの
-  `read_dar_table()`および`run_dar()`への伝播、promoter境界・複数peak→同一gene・
-  3正規化方式の回帰テスト、設計書§13の`.tsv.gz`表記への修正、STRINGの空・不正PNGを
-  失敗として記録する応答判定、Meta/TF/Interactionの結果あり回帰検証、Interaction
-  Analysisの`padj_is_na`/`lfc_is_na`保持、ATAC入力原本SHA-256、ATAC-onlyの共有
-  manifest/ZIP、user-provided peak--gene mappingの明示座標系・transform log、validation summary、unmapped peak表、
-  設計書§11.1のATAC-only可視化と全図caption。
-- **Verification:** 監査是正のATAC UI/provenance/user mapping回帰テストと既存RNA export
-  回帰テストがローカルで成功。GitHub Actions run `35479948941`（`c747f2e`）は
-  Ubuntu/Windows × Python 3.11/3.12の4環境すべて成功。監査役A・BはともにGO。
-- **Phase 3 planning decision:** ユーザーが委任した監査役C（科学・bioinformatics・
-  非プログラマー向け運用性の判断担当）が決定した。双方未検定は`both_not_tested`、
-  `lfc_is_na`は公開契約に保持、gene ID共有0件だけを停止し80%未満は強い警告として
-  続行する。詳細は設計書§6.3・§8・§10と`docs/phase3_implementation_plan.md`を参照する。
-- **Phase 3 audit status:** Cの判断を文書化済み。実装に対する監査役A・Bの最終GOと、
-  `e43801f`の4環境CI成功を取得済み。
-- **OPEN QUESTIONS:** なし。
-- **Phase 4 gate:** 監査役A・Bはcommit `0984639`のPhase 4計画に対し、ともにGOを発行した。
-- **Verification:** 新規ORA/Integration UI/既存integration core 11件とATAC UI 5件がローカルで
-  成功。local Human KEGG GMTを使うORA最小実行も49件の結果を返した。全121件のうち6件は、
-  既知のローカルPyDESeq2 API不一致（`DeseqDataSet`が`design=`を受けない）で失敗し、
-  Phase 4変更起因ではない。
-- **OPEN QUESTIONS:** なし。
-- **Next task:** Phase 4実装commitのGitHub Actions（Ubuntu/Windows × Python 3.11/3.12）を
-  確認し、必要なら監査役A・BによるPhase 4完了監査を行う。
+- **Status:** Phase 4完了（2026-09-20）。commit `d2674ec`のGitHub Actions（run `35507389636`、
+  Ubuntu/Windows × Python 3.11/3.12の4環境）は成功。監査役A・Bの指摘（ORA背景遺伝子の
+  定義・件数の表示、`mixed_accessibility`の方向非依存ラベル、README/CHANGELOG/PLANの整合、
+  contrast未指定テスト）を是正し、A・B再監査で双方GO。Level 2/3のUI・処理・exportは追加していない。
+  是正を含む本status更新commitのCIは、push後に別途確認する。
+- **Last implementation commits:** `2c9acd1`（Phase 4 Level 1 integration UI、local ORA、共有
+  export/provenance）、`e2922b9`（Integration provenanceとORA履歴）、`d2674ec`（ORA背景説明）。
+- **Last verified CI:** run `35507389636`、`d2674ec`、4環境すべて成功（2026-09-20確認）。
+- **Phase 3 completion:** 監査役A・Bが最終GO、`e43801f`の4環境CI成功（run `35482053565`）。
+  計画判断は監査役C（gene ID共有0件のみ停止、80%未満は強い警告、双方未検定は
+  `both_not_tested`）。詳細は設計書§6.3・§8・§10と`docs/phase3_implementation_plan.md`。
+- **Phase 4 gate:** 監査役A・Bはcommit `0984639`のPhase 4計画にGOを発行済み。
+- **Verification:** Integration関連4テストファイル（enrichment / integration UI / multiomics /
+  ATAC UI）18件がローカルで成功。全体テスト122件のうち9件は、ローカルPyDESeq2 0.4.12の
+  API不一致（`DeseqDataSet`が`design=`を受けない）による既知の失敗で、Phase 4変更起因ではない
+  （CIでは全件成功）。
+- **Phase 4 completion audit:** 監査役A・Bとも再監査でGO。Aは以下2点をPhase 4完了の
+  ブロッカーではないと判断した。
+- **OPEN QUESTIONS:** なし。残存事項（非ブロッカー）: 設計書のLevel 1/2/3ステージ1行表示は
+  未実装（Phase 5で扱う）。DAR contrastのラベルは利用者入力のため、入力誤りはデータから
+  検出できない（ラベル未指定・不一致は実行を拒否する）。
+- **Next task:** 本commitのGitHub Actions（4環境）を確認する。Phase 5への着手はユーザーの
+  明示的な指示を待つ。
 - **Do not start:** Phase 5以降のTF/motif機能には着手しない。既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
@@ -314,7 +305,7 @@ RNA入力なしでATAC単独解析が完了する。
 
 ## Phase 4: Integration UI（レベル1）
 
-**状態:** 実装完了 — CI確認待ち（2026-09-20）
+**状態:** 完了（2026-09-20）— CI成功（run `35507389636`、`d2674ec`、4環境）、監査役A・Bとも再監査でGO
 **設計書参照:** §6.3, §11.2, §16.2
 
 **作業**

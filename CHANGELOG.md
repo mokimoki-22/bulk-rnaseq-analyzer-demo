@@ -7,6 +7,12 @@
 
 ### Added
 
+- Phase 3/4: `Multi-omics`内に`Integration`サブタブを追加。RNA/ATACの構造化contrast
+  （reference/test）が一致しない、または未指定の場合は実行しない。gene-summary quadrantと
+  除外理由、evidence table（gene/edge単位）、class別ローカルORA（Human GO/KEGG、
+  Mouse KEGG。Mouse GOは未対応として明示）、ORA実行履歴（同一classの再実行も追記保持）、
+  ORA背景遺伝子の定義・件数の表示、共有manifest/ZIPへのIntegration provenance出力を実装。
+  Level 2/3（TF/motif）は含まない。
 - Phase 1: Streamlit非依存の`brim_atac.py`を追加。peak count matrixの2座標形式、
   解析済みDARのschema/alias検証、PyDESeq2によるDAR推定、NAフラグ、strand-aware
   promoter overlap、nearest-TSS tie、一対多edge、QC/BED helperを実装。
