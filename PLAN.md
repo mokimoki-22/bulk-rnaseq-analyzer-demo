@@ -1,7 +1,7 @@
 # PLAN.md — BRIM v2.0 実装計画
 
 - 対応設計書: `docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
-- 現在Phase: **Phase 3**
+- 現在Phase: **Phase 4**
 - 最終更新: 2026-09-20
 
 ## Current development status
@@ -9,12 +9,12 @@
 この節を、PCやCodexを切り替えて作業を再開するときの唯一の現在地とする。
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
-- **Current phase:** Phase 3 — Integration core（Level 1）
-- **Status:** Phase 3完了。Streamlit非依存のLevel 1 integration core、RNA起点の
-  integration invalidation、全分類・NA・compatibility・mixed accessibility・固定seed陰性対照を
-  実装し、監査役A・BのGOと4環境CI成功を取得済み。
-- **Last implementation commit:** `e43801f` — Phase 3 integration core、RNA invalidation、
-  unit/negative-control tests。
+- **Current phase:** Phase 4 — Integration UI（Level 1）
+- **Status:** 実装完了、commit/CI確認待ち。監査役A・BのGO後、Integration subtab、構造化
+  RNA/DAR contrast照合、gene-summary quadrant/evidence table、class別のlocal ORA、共有
+  export/provenance、UI回帰を実装した。Level 2/3のUI・処理・exportは追加していない。
+- **Last implementation commit:** `2c9acd1` — Phase 4 Level 1 integration UI、local ORA、
+  shared export/provenance、contrast/Mouse GO safeguards、回帰テスト。
 - **Last verified CI:** GitHub Actions run `35482053565`、`e43801f`、Ubuntu/Windows ×
   Python 3.11/3.12の4環境すべて成功。
 - **Completed remediation:** 1-based closedの単一塩基peak変換、座標transform logの
@@ -34,11 +34,15 @@
 - **Phase 3 audit status:** Cの判断を文書化済み。実装に対する監査役A・Bの最終GOと、
   `e43801f`の4環境CI成功を取得済み。
 - **OPEN QUESTIONS:** なし。
-- **Next task:** ユーザー承認済み。監査役CのPhase 4表示・ORA・contrast・Mouse GO判断を
-  `docs/phase4_implementation_plan.md`へ記録し、独立監査役A・Bのphase-transition GOを得る。
-  GO前にPhase 4を実装しない。
-- **Do not start:** Phase 4以降のUI・export・enrichment・TF/motif機能には着手しない。
-  既存RNA-only workflowを変更しない。
+- **Phase 4 gate:** 監査役A・Bはcommit `0984639`のPhase 4計画に対し、ともにGOを発行した。
+- **Verification:** 新規ORA/Integration UI/既存integration core 11件とATAC UI 5件がローカルで
+  成功。local Human KEGG GMTを使うORA最小実行も49件の結果を返した。全121件のうち6件は、
+  既知のローカルPyDESeq2 API不一致（`DeseqDataSet`が`design=`を受けない）で失敗し、
+  Phase 4変更起因ではない。
+- **OPEN QUESTIONS:** なし。
+- **Next task:** Phase 4実装commitのGitHub Actions（Ubuntu/Windows × Python 3.11/3.12）を
+  確認し、必要なら監査役A・BによるPhase 4完了監査を行う。
+- **Do not start:** Phase 5以降のTF/motif機能には着手しない。既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
@@ -396,7 +400,7 @@ sample dataからTF候補が提示され、背景と多重検定の扱いが結�
 
 ## Phase 7: 検証と公開
 
-**状態:** 未着手
+**状態:** 実装完了 — CI確認待ち（2026-09-20）
 **設計書参照:** §17.3, §21
 
 **前提（Phase 0.5再監査からの残存事項）**
