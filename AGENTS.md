@@ -43,9 +43,11 @@ read-only audit decisions:
 
 Each auditor must issue one of: **GO**, **CONDITIONAL NO-GO**, or **NO-GO**,
 with evidence and OPEN QUESTIONS. A new phase may begin only when both
-auditors issue **GO**. If either auditor does not issue **GO**, their decision
-governs the gate; do not override it or begin the phase unless the user gives
-explicit authorization after reviewing the reported condition or objection.
+auditors issue **GO** for the transition. If either auditor does not issue
+**GO**, their decision governs the gate: do not override it. Remediate the
+condition (Auditor C decides any planning choice involved), then obtain fresh
+A/B decisions. Only the user may authorize starting a phase over an auditor's
+non-GO decision.
 
 Auditors do not edit implementation, tests, plans, or configuration while
 auditing. Their reports are evidence for the phase-transition decision, not
@@ -53,19 +55,45 @@ implementation instructions.
 
 ## Planning decision authority
 
-When the user explicitly delegates an unresolved planning or design choice,
-appoint **Auditor C — scientific, bioinformatics, and usability decision
-authority**. Auditor C reviews the scientific implications, bioinformatics
-data contract, and usability for biologists who do not program, then makes the
-delegated decision with rationale and acceptance tests.
+**Auditor C — scientific, bioinformatics, and usability decision authority**
+holds the user's standing delegation (granted 2026-09-20) for planning and
+design decisions that would otherwise wait for a user instruction. No new user
+message is needed to appoint C for these. Auditor C reviews the scientific
+implications, bioinformatics data contract, and usability for biologists who do
+not program, then decides with rationale and acceptance tests.
 
-Auditor C's decision is the authorized resolution for that delegated choice.
-It must be recorded in the relevant design and planning documents before
-implementation. Auditor C cannot waive project-specific invariants, expand the
-delegated scope, or replace the independent A/B phase-transition audit gate.
+Delegated to C:
+- Resolving unresolved planning or design choices and OPEN QUESTIONS that stay
+  within the design document and PLAN.md.
+- Triaging audit residuals: fix now (minimal, in current phase scope), defer to
+  a named phase, or accept as documented.
+- Deciding whether to begin the next phase, once **both** A and B have issued
+  GO for the phase transition. C's decision is recorded in PLAN.md
+  (Current development status) before implementation starts.
+- Choosing the next task when PLAN.md's "Next task" is complete.
+
+Auditor C's decision is the authorized resolution for that choice. It must be
+recorded in the relevant design and planning documents before implementation.
 Auditor C is read-only while deciding; implementation remains the responsibility
 of the primary agent after the decision is documented and the required A/B GO
 decisions are obtained.
+
+Limits of the delegation. Auditor C cannot:
+- waive or reinterpret a project-specific invariant (I-1 to I-6), or approve a
+  rejected design (I-5);
+- replace or override the independent A/B audit gate, or override an auditor's
+  non-GO decision;
+- add scope that is absent from the design document (a new phase, feature, or
+  external dependency), or add network calls or dependencies that break
+  Windows portable distribution (I-4);
+- approve destructive or irreversible operations (force push, `git reset
+  --hard`, deleting user data or existing clones, unconfirmed stash operations),
+  license changes, or entering credentials;
+- weaken, skip, or delete valid tests.
+
+These still require an explicit user instruction. A user's explicit
+task-specific instruction that is newer than this delegation (for example, "do
+not start Phase N") takes precedence until the user withdraws it.
 
 ## Coding
 

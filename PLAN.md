@@ -35,9 +35,11 @@
 - **OPEN QUESTIONS:** なし。残存事項（非ブロッカー）: 設計書のLevel 1/2/3ステージ1行表示は
   未実装（Phase 5で扱う）。DAR contrastのラベルは利用者入力のため、入力誤りはデータから
   検出できない（ラベル未指定・不一致は実行を拒否する）。
-- **Next task:** 本文書commitのGitHub Actions（4環境）を確認する。Phase 5への着手は、ユーザーの
-  明示的な指示と、Phase 4→5移行に関する監査役A・Bの（必要なら再）GOを待つ。
-- **Do not start:** Phase 5以降のTF/motif機能には着手しない。既存RNA-only workflowを変更しない。
+- **Next task:** 本文書commitのGitHub Actions（4環境）を確認する。その後、Phase 4→5移行について
+  監査役A・Bの独立監査を受け、両者GOの場合に限り、監査役Cが着手可否を決定してPLAN.mdへ記録する
+  （AGENTS.mdのPlanning decision authority、2026-09-20のユーザー常設委任）。
+- **Do not start:** Phase 4→5移行のA・B両GOと監査役Cの着手決定が記録されるまで、Phase 5以降の
+  TF/motif機能には着手しない。既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
