@@ -76,3 +76,39 @@ def colliding_id_dar_table() -> pd.DataFrame:
     """Two tested peaks whose identifiers become identical after whitespace replacement."""
     return _frame([("a b", "chr1", 100, 200, 2.0, 0.001, False, False),
                    ("a_b", "chr1", 300, 400, -2.0, 0.001, False, False)])
+
+
+# --------------------------------------------------------------------------------------------------
+# Synthetic motif results (step 2).  The motif names and numbers are made up for the tests; they are not copies of
+# any tool's output.
+# --------------------------------------------------------------------------------------------------
+
+HOMER_HEADER = [
+    "Motif Name", "Consensus", "P-value", "Log P-value", "q-value (Benjamini)",
+    "# of Target Sequences with Motif(of 123)", "% of Target Sequences with Motif",
+    "# of Background Sequences with Motif(of 4567)", "% of Background Sequences with Motif",
+]
+# (name, consensus, p, log p, q, n target, % target, n background, % background)
+HOMER_DEFAULT_ROWS = [
+    ("Stat3(Stat)/Fixture-Stat3-ChIP-Seq(GSE00000)/Homer", "ATTTCCNGGAAAT", "1e-30", "-69.1", "0.0001", "90", "73.17%", "1500", "32.85%"),
+    ("Oct4:Sox17(POU,Homeobox/HMG)/Fixture-Oct4-Sox17-ChIP-Seq/Homer", "ATGCAAATNN", "1e-10", "-23.0", "0.01", "40", "32.52%", "700", "15.33%"),
+    ("AP-1(bZIP)/Fixture-AP1-ChIP-Seq/Homer", "NATGASTCATNN", "1e-8", "-18.4", "0.02", "35", "28.46%", "600", "13.14%"),
+    ("stat3(Stat)/Fixture-lowercase-name/Homer", "ATTTCCNGGAAAT", "1e-5", "-11.5", "0.5", "20", "16.26%", "500", "10.95%"),
+    ("Stat3(Stat)/Fixture-second-Stat3-row/Homer", "TTCCNGGAA", "1e-6", "-13.8", "0.3", "22", "17.89%", "520", "11.39%"),
+    ("Myc(bHLH)/Fixture-Myc-ChIP-Seq/Homer", "CACGTG", "0.2", "-1.6", "NA", "12", "9.76%", "480", "10.51%"),
+    ("NotATf(Zf)/Fixture-unmatched/Homer", "GGGGGG", "1e-4", "-9.2", "0.6", "18", "14.63%", "450", "9.85%"),
+]
+
+
+def homer_known_text(rows=None, header=None, delimiter: str = "\t") -> str:
+    """A HOMER-knownResults-like table (header plus rows), tab separated by default."""
+    lines = [delimiter.join(header if header is not None else HOMER_HEADER)]
+    lines += [delimiter.join(map(str, row)) for row in (HOMER_DEFAULT_ROWS if rows is None else rows)]
+    return "\n".join(lines) + "\n"
+
+
+def generic_motif_csv(rows=None, header=("motif", "q_value", "p_value", "peak_set"), delimiter: str = ",") -> str:
+    """A generic motif CSV/TSV: (motif, q, p, peak_set) rows."""
+    default = [("Stat3", "0.0001", "1e-30", "opening"), ("Oct4:Sox17", "0.01", "1e-10", "opening"), ("Myc", "NA", "0.2", "opening")]
+    lines = [delimiter.join(header)] + [delimiter.join(map(str, row)) for row in (default if rows is None else rows)]
+    return "\n".join(lines) + "\n"

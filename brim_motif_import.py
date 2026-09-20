@@ -8,7 +8,9 @@ rule are recorded in ``docs/phase6_implementation_plan.md``.
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import math
 import re
@@ -25,6 +27,10 @@ class MotifImportError(ValueError):
 
 PEAK_SETS = ("opening", "closing")
 SMALL_PEAK_SET_WARNING = 100
+MAX_IMPORT_BYTES = 10 * 1024 * 1024
+MAX_IMPORT_ROWS = 20_000
+MAX_REPORTED_ROW_ERRORS = 5
+_MISSING_TOKENS = {"", "na", "nan", "n/a", "null", "none"}
 COORDINATE_CONVENTION = "0-based half-open (BED)"
 # The genome names HOMER understands for the builds BRIM supports.  Nothing typed by a user is ever placed in a command.
 HOMER_GENOMES = {"hg38": "hg38", "mm10": "mm10"}
@@ -307,3 +313,252 @@ def build_motif_bundle(peak_sets: PeakSets, app_version: str, generated_at: str)
 def bundle_sha256(bundle: Mapping[str, str]) -> dict[str, str]:
     """Return the SHA-256 of each exported file body (UTF-8), for the manifest."""
     return {path: hashlib.sha256(text.encode("utf-8")).hexdigest() for path, text in sorted(bundle.items())}
+
+
+# --------------------------------------------------------------------------------------------------
+# Reading an external motif result (plan D1, D10).  BRIM reads what the tool reported and recomputes nothing.
+# --------------------------------------------------------------------------------------------------
+
+HOMER_REQUIRED_HEADERS = ("motif name", "p-value", "q-value (benjamini)")
+DE_NOVO_OR_MOTIF_FILE_MESSAGE = (
+    "Choose a HOMER knownResults.txt (columns Motif Name and q-value (Benjamini)) or a CSV/TSV. De novo results and "
+    "motif files cannot be imported. / HOMERのknownResults.txt（Motif Nameとq-value (Benjamini)の列）または"
+    "CSV/TSVを選んでください。de novo結果とmotifファイルは取り込めません。"
+)
+_COLUMN_ALIASES = {
+    "motif_name": ("motif_name", "motif name", "motif", "name"),
+    "padj": ("padj", "q-value", "qvalue", "q value", "fdr", "adj.p", "adjusted p-value", "q-value (benjamini)"),
+    "pvalue": ("pvalue", "p-value", "p value", "p_val", "p"),
+    "enrichment_score": ("enrichment_score", "enrichment", "fold enrichment", "score"),
+    "motif_id": ("motif_id", "id"),
+    "peak_set": ("peak_set", "peakset"),
+}
+
+
+@dataclass(frozen=True)
+class MotifTable:
+    """A validated motif result: the rows as reported, what was recorded about the file, and any warnings."""
+
+    rows: pd.DataFrame
+    record: dict[str, Any]
+    warnings: list[dict[str, str]] = field(default_factory=list)
+
+
+def _normal_header(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text).strip().lower())
+
+
+def _safe_file_name(name: str) -> str:
+    base = re.split(r"[\\/]", str(name))[-1]
+    return re.sub(r"[^\x20-\x7e\u3000-\u9fff\uff00-\uffef]", "_", base)[:200] or "unnamed"
+
+
+def suggest_column_map(columns: list[str]) -> dict[str, str]:
+    """Propose a column map for a generic file from a fixed alias list; the user must confirm it."""
+    lookup = {_normal_header(column): column for column in columns}
+    suggestion: dict[str, str] = {}
+    for target, aliases in _COLUMN_ALIASES.items():
+        for alias in aliases:
+            if alias in lookup:
+                suggestion[target] = lookup[alias]
+                break
+    return suggestion
+
+
+def _decode(data: bytes) -> tuple[str, str]:
+    for encoding in ("utf-8-sig", "cp932"):
+        try:
+            return data.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    raise MotifImportError("The file is not readable text. Save it as UTF-8 (or Shift-JIS) CSV/TSV and try again.")
+
+
+def _read_delimited(text: str) -> tuple[list[str], list[tuple[int, list[str]]], str, int]:
+    """Return (header, [(line_number, fields)], delimiter, n_skipped_lines); comment and blank lines are skipped."""
+    lines = text.splitlines()
+    header_line = next((line for line in lines if line.strip() and not line.startswith("#")), None)
+    if header_line is None:
+        raise MotifImportError("The file has no header row.")
+    if header_line.lstrip().startswith(">"):
+        raise MotifImportError(DE_NOVO_OR_MOTIF_FILE_MESSAGE)
+    if "\t" in header_line:
+        delimiter = "\t"
+    elif "," in header_line:
+        delimiter = ","
+    elif ";" in header_line:
+        raise MotifImportError("Semicolon-separated files are not supported. Save the file as CSV (comma) or TSV (tab) "
+                               "and try again. / セミコロン区切りは非対応です。CSV（カンマ）またはTSV（タブ）で保存し直してください。")
+    else:
+        raise MotifImportError("Could not find a tab or comma in the header row. Save the file as CSV or TSV. / "
+                               "ヘッダー行にタブもカンマも見つかりません。CSVまたはTSVで保存してください。")
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    header: list[str] | None = None
+    rows: list[tuple[int, list[str]]] = []
+    skipped = 0
+    for fields in reader:
+        line_number = reader.line_num
+        if not fields or all(not value.strip() for value in fields) or fields[0].startswith("#"):
+            skipped += 1
+            continue
+        if header is None:
+            header = [value.strip() for value in fields]
+            continue
+        rows.append((line_number, fields))
+    if header is None:
+        raise MotifImportError("The file has no header row.")
+    return header, rows, delimiter, skipped
+
+
+def _parse_probability(value: str, name: str, line: int, problems: list[str]) -> float:
+    token = str(value).strip()
+    if token.lower() in _MISSING_TOKENS:
+        return float("nan")
+    try:
+        number = float(token)
+    except ValueError:
+        problems.append(f"line {line}: {name} '{token}' is not a number")
+        return float("nan")
+    if not math.isfinite(number):
+        problems.append(f"line {line}: {name} '{token}' is not a finite number")
+        return float("nan")
+    if not 0 <= number <= 1:
+        problems.append(f"line {line}: {name} {token} is outside 0-1")
+        return float("nan")
+    return number
+
+
+def _parse_percent(value: str) -> float:
+    token = str(value).strip().rstrip("%").strip()
+    try:
+        number = float(token)
+    except ValueError:
+        return float("nan")
+    return number if math.isfinite(number) else float("nan")
+
+
+def _homer_columns(header: list[str]) -> tuple[dict[str, int], dict[str, int | None]]:
+    normal = [_normal_header(column) for column in header]
+
+    def find(prefix: str, exclude: str | None = None) -> int | None:
+        for index, name in enumerate(normal):
+            if name.startswith(prefix) and not (exclude and name.startswith(exclude)):
+                return index
+        return None
+
+    positions = {"motif_name": find("motif name"), "pvalue": find("p-value"), "padj": find("q-value (benjamini)")}
+    missing = [label for label, key in zip(HOMER_REQUIRED_HEADERS, ("motif_name", "pvalue", "padj")) if positions[key] is None]
+    if missing:
+        raise MotifImportError(
+            "This does not look like a HOMER knownResults.txt: the columns " + ", ".join(missing) + " were not found "
+            "(found: " + ", ".join(header[:8]) + "). " + DE_NOVO_OR_MOTIF_FILE_MESSAGE)
+    optional = {
+        "target_count": find("# of target sequences with motif"), "pct_target": find("% of target sequences with motif"),
+        "background_count": find("# of background sequences with motif"),
+        "pct_background": find("% of background sequences with motif"),
+    }
+    return {key: int(value) for key, value in positions.items()}, optional
+
+
+def _sequence_total(header_text: str | None) -> int | None:
+    match = re.search(r"\(of\s+(\d+)\)", header_text or "", flags=re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def read_motif_results(data: bytes, file_name: str, tool: str, column_map: Mapping[str, str] | None = None) -> MotifTable:
+    """Validate and read a motif result exactly as the external tool reported it (nothing is recomputed).
+
+    ``tool`` is ``homer_known`` (a HOMER knownResults.txt) or ``generic`` (a CSV/TSV with a user-confirmed
+    ``column_map``).  Missing values stay missing (I-1.1).  The file is checked for size, row count, encoding,
+    delimiter and probability ranges, and errors name the offending lines.
+    """
+    if tool not in ("homer_known", "generic"):
+        raise MotifImportError("tool must be homer_known or generic.")
+    if not data:
+        raise MotifImportError("The file is empty.")
+    if len(data) > MAX_IMPORT_BYTES:
+        raise MotifImportError(f"The file is larger than the limit of {MAX_IMPORT_BYTES:,} bytes; import a smaller result.")
+    text, encoding = _decode(data)
+    header, records, delimiter, skipped = _read_delimited(text)
+    if not records:
+        raise MotifImportError("The file has a header but no data rows.")
+    if len(records) > MAX_IMPORT_ROWS:
+        raise MotifImportError(f"The file has more than {MAX_IMPORT_ROWS} data rows; import a smaller result.")
+
+    def cell(fields: list[str], index: int | None) -> str:
+        return fields[index] if index is not None and index < len(fields) else ""
+
+    problems: list[str] = []
+    out: dict[str, list[Any]] = {key: [] for key in ("source_line", "motif_name", "motif_id", "pvalue", "padj", "pct_target",
+                                                      "pct_background", "enrichment_score", "peak_set")}
+    record: dict[str, Any] = {}
+    if tool == "homer_known":
+        positions, optional = _homer_columns(header)
+        record["column_map"] = {key: header[index] for key, index in positions.items()}
+        record["column_map"].update({key: header[index] for key, index in optional.items() if index is not None})
+        record["n_target_sequences_reported"] = _sequence_total(header[optional["target_count"]] if optional["target_count"] is not None else None)
+        record["n_background_sequences_reported"] = _sequence_total(header[optional["background_count"]] if optional["background_count"] is not None else None)
+        columns = {**positions, **{key: value for key, value in optional.items() if value is not None}}
+        peak_set_index = enrichment_index = motif_id_index = None
+    else:
+        if not column_map:
+            raise MotifImportError("A column map is required for a generic file. Suggested: " + json.dumps(suggest_column_map(header))
+                                   + ". Confirm or correct it and import again.")
+        unknown = [f"{key} -> {value}" for key, value in column_map.items() if value not in header]
+        if unknown:
+            raise MotifImportError("Mapped columns not found in the file: " + ", ".join(unknown) + ".")
+        if "motif_name" not in column_map or not ({"padj", "pvalue"} & set(column_map)):
+            raise MotifImportError("The column map needs motif_name and at least one of padj or pvalue.")
+        index_of = {key: header.index(value) for key, value in column_map.items()}
+        record["column_map"] = dict(column_map)
+        record["n_target_sequences_reported"] = record["n_background_sequences_reported"] = None
+        columns = {"motif_name": index_of["motif_name"], "pvalue": index_of.get("pvalue"), "padj": index_of.get("padj"),
+                   "pct_target": None, "pct_background": None}
+        peak_set_index, enrichment_index, motif_id_index = (index_of.get("peak_set"), index_of.get("enrichment_score"),
+                                                            index_of.get("motif_id"))
+    for line, fields in records:
+        name = cell(fields, columns["motif_name"]).strip()
+        if not name:
+            problems.append(f"line {line}: the motif name is empty")
+        out["source_line"].append(line)
+        out["motif_name"].append(name)
+        out["motif_id"].append(cell(fields, motif_id_index).strip() if motif_id_index is not None else "")
+        out["pvalue"].append(_parse_probability(cell(fields, columns.get("pvalue")), "pvalue", line, problems)
+                             if columns.get("pvalue") is not None else float("nan"))
+        out["padj"].append(_parse_probability(cell(fields, columns.get("padj")), "padj", line, problems)
+                           if columns.get("padj") is not None else float("nan"))
+        out["pct_target"].append(_parse_percent(cell(fields, columns.get("pct_target"))) if columns.get("pct_target") is not None else float("nan"))
+        out["pct_background"].append(_parse_percent(cell(fields, columns.get("pct_background"))) if columns.get("pct_background") is not None else float("nan"))
+        score = cell(fields, enrichment_index).strip() if enrichment_index is not None else ""
+        try:
+            out["enrichment_score"].append(float(score) if score.lower() not in _MISSING_TOKENS else float("nan"))
+        except ValueError:
+            problems.append(f"line {line}: enrichment_score '{score}' is not a number")
+            out["enrichment_score"].append(float("nan"))
+        out["peak_set"].append(cell(fields, peak_set_index).strip().lower() if peak_set_index is not None else "")
+    if problems:
+        shown = "; ".join(problems[:MAX_REPORTED_ROW_ERRORS])
+        more = f" (and {len(problems) - MAX_REPORTED_ROW_ERRORS} more)" if len(problems) > MAX_REPORTED_ROW_ERRORS else ""
+        raise MotifImportError(f"The file has invalid values: {shown}{more}.")
+    rows = pd.DataFrame(out)
+    peak_sets_in_file = sorted({value for value in rows["peak_set"] if value})
+    if peak_set_index is not None:
+        if len(peak_sets_in_file) != 1 or peak_sets_in_file[0] not in PEAK_SETS:
+            raise MotifImportError("The peak_set column must hold only one value, opening or closing. Split the file by "
+                                   "peak set and import each part. Found: " + (", ".join(peak_sets_in_file) or "none") + ".")
+        record["peak_set_in_file"] = peak_sets_in_file[0]
+    else:
+        record["peak_set_in_file"] = None
+    record.update(
+        file_name=_safe_file_name(file_name), byte_size=len(data), sha256=hashlib.sha256(data).hexdigest(), encoding=encoding,
+        delimiter="tab" if delimiter == "\t" else "comma", tool=tool, n_rows=int(len(rows)), n_lines_skipped=int(skipped),
+        n_missing_padj=int(rows["padj"].isna().sum()), n_missing_pvalue=int(rows["pvalue"].isna().sum()),
+        no_padj_reported=bool(rows["padj"].isna().all()),
+    )
+    warnings: list[dict[str, str]] = []
+    if record["no_padj_reported"]:
+        warnings.append({"code": "no_padj_reported",
+                         "message": "The file has no adjusted p-values. BRIM does not adjust p-values; only the reported "
+                                    "p-values are shown.",
+                         "message_ja": "調整済みp値がありません。BRIMはp値を補正しないため、報告されたp値のみを表示します。"})
+    return MotifTable(rows=rows.drop(columns=[] if peak_set_index is not None else ["peak_set"]), record=record, warnings=warnings)

@@ -1,6 +1,6 @@
 """Phase 6 Level 3 motif import core tests (Streamlit-free), built up step by step.
 
-Step 1: peak sets, BED files, commands, README and the export bundle.
+Step 1: peak sets, BED files, commands, README and the export bundle.  Step 2: reading motif results.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ import pytest
 
 import brim_atac
 import brim_motif_import as mi
-from motif_support import (THRESHOLDS, boundary_dar_table, colliding_id_dar_table, expected_boundary_sets,
-                           synthetic_dar_table)
+from motif_support import (HOMER_DEFAULT_ROWS, HOMER_HEADER, THRESHOLDS, boundary_dar_table, colliding_id_dar_table,
+                           expected_boundary_sets, generic_motif_csv, homer_known_text, synthetic_dar_table)
 
 
 def _sets(dar=None, thresholds=THRESHOLDS, build="hg38", species="Human"):
@@ -238,3 +238,191 @@ def test_module_is_streamlit_free_and_never_runs_processes_or_touches_the_networ
                  "ftplib", "shlex", "multiprocessing"}
     assert not imported & forbidden, imported & forbidden
     assert "os.system" not in source and "os.popen" not in source and "Popen" not in source
+
+
+# ----------------------------------------------------------------------------------------------
+# Step 2: reading motif results (D1, D10)
+# ----------------------------------------------------------------------------------------------
+
+def _homer(text=None, name="knownResults.txt", **kwargs):
+    return mi.read_motif_results((homer_known_text() if text is None else text).encode("utf-8"), name, "homer_known", **kwargs)
+
+
+def _generic(text=None, column_map=None, name="motif.csv", encoding="utf-8"):
+    return mi.read_motif_results((generic_motif_csv() if text is None else text).encode(encoding), name, "generic",
+                                 column_map={"motif_name": "motif", "padj": "q_value", "pvalue": "p_value"}
+                                 if column_map is None else column_map)
+
+
+def test_homer_known_results_are_read_exactly_as_reported_and_nothing_is_recomputed():
+    table = _homer()
+    rows = table.rows
+    assert len(rows) == len(HOMER_DEFAULT_ROWS) == table.record["n_rows"]
+    assert rows["motif_name"].iloc[0] == HOMER_DEFAULT_ROWS[0][0]
+    assert rows["padj"].iloc[:5].tolist() == [0.0001, 0.01, 0.02, 0.5, 0.3]          # the q-value (Benjamini) column as is
+    assert rows["pvalue"].iloc[0] == 1e-30 and rows["pvalue"].iloc[1] == 1e-10
+    assert rows["pct_target"].iloc[0] == 73.17 and rows["pct_background"].iloc[0] == 32.85        # '%' removed, value kept
+    assert rows["enrichment_score"].isna().all()                                                # BRIM derives no score
+    assert rows["source_line"].tolist() == list(range(2, 2 + len(rows)))
+    record = table.record
+    assert (record["n_target_sequences_reported"], record["n_background_sequences_reported"]) == (123, 4567)
+    assert record["tool"] == "homer_known" and record["delimiter"] == "tab" and record["encoding"] == "utf-8-sig"
+    assert record["column_map"]["padj"] == "q-value (Benjamini)" and record["column_map"]["motif_name"] == "Motif Name"
+    assert len(record["sha256"]) == 64 and record["byte_size"] == len(homer_known_text().encode("utf-8"))
+    assert record["file_name"] == "knownResults.txt" and record["peak_set_in_file"] is None
+    assert "peak_set" not in rows.columns
+
+
+def test_missing_values_stay_missing_and_are_counted_never_filled():
+    table = _homer()
+    assert table.rows["padj"].isna().sum() == 1 == table.record["n_missing_padj"]        # the NA q-value row
+    assert table.rows.loc[table.rows["motif_name"].str.startswith("Myc"), "padj"].isna().all()
+    assert not table.record["no_padj_reported"] and table.warnings == []
+
+
+def test_header_recognition_ignores_case_and_spacing_and_extra_columns():
+    header = [h.upper().replace("(", "  (") for h in HOMER_HEADER] + ["Extra Column"]
+    rows = [row + ("x",) for row in HOMER_DEFAULT_ROWS]
+    table = _homer(homer_known_text(rows, header))
+    assert table.rows["padj"].iloc[0] == 0.0001
+    assert table.record["n_target_sequences_reported"] == 123
+
+
+def test_homer_log_p_value_column_is_not_mistaken_for_the_p_value_column():
+    table = _homer()
+    assert table.rows["pvalue"].iloc[0] == 1e-30 and table.rows["pvalue"].iloc[0] != -69.1
+
+
+def test_de_novo_motif_files_and_unrecognised_headers_are_rejected_with_a_clear_message():
+    with pytest.raises(mi.MotifImportError, match="de novo"):
+        _homer(">ATGCAAAT\tMotif1\t8.5\n")
+    with pytest.raises(mi.MotifImportError, match="q-value \\(Benjamini\\)"):
+        _homer(homer_known_text(header=["Motif Name", "Consensus", "P-value", "Log P-value", "Log P-pvalue"]))
+    with pytest.raises(mi.MotifImportError, match="knownResults"):
+        _homer("Gene\tScore\nA\t1\n")
+    with pytest.raises(mi.MotifImportError, match="no header"):
+        _homer("# only a comment\n\n")
+
+
+def test_generic_file_needs_a_confirmed_column_map_and_reads_the_mapped_columns():
+    text = generic_motif_csv()
+    with pytest.raises(mi.MotifImportError, match="column map is required"):
+        mi.read_motif_results(text.encode("utf-8"), "m.csv", "generic")
+    assert mi.suggest_column_map(["Motif", "Q-Value", "p-value", "Peak_Set", "Other"]) == {
+        "motif_name": "Motif", "padj": "Q-Value", "pvalue": "p-value", "peak_set": "Peak_Set"}
+    table = _generic(text)
+    assert table.rows["padj"].iloc[:2].tolist() == [0.0001, 0.01] and table.rows["padj"].isna().sum() == 1
+    assert table.record["peak_set_in_file"] is None
+    assert table.record["column_map"] == {"motif_name": "motif", "padj": "q_value", "pvalue": "p_value"}
+    with pytest.raises(mi.MotifImportError, match="not found in the file"):
+        _generic(text, column_map={"motif_name": "motif", "padj": "missing_column"})
+    with pytest.raises(mi.MotifImportError, match="at least one of padj or pvalue"):
+        _generic(text, column_map={"motif_name": "motif"})
+    with pytest.raises(mi.MotifImportError, match="motif_name"):
+        _generic(text, column_map={"padj": "q_value"})
+
+
+def test_generic_peak_set_column_must_hold_a_single_known_peak_set():
+    column_map = {"motif_name": "motif", "padj": "q_value", "pvalue": "p_value", "peak_set": "peak_set"}
+    assert _generic(column_map=column_map).record["peak_set_in_file"] == "opening"
+    upper = generic_motif_csv([("Stat3", "0.1", "0.01", "CLOSING")])
+    assert _generic(upper, column_map=column_map).record["peak_set_in_file"] == "closing"
+    mixed = generic_motif_csv([("Stat3", "0.1", "0.01", "opening"), ("Myc", "0.2", "0.02", "closing")])
+    with pytest.raises(mi.MotifImportError, match="Split the file"):
+        _generic(mixed, column_map=column_map)
+    with pytest.raises(mi.MotifImportError, match="one value, opening or closing"):
+        _generic(generic_motif_csv([("Stat3", "0.1", "0.01", "background")]), column_map=column_map)
+
+
+def test_only_a_pvalue_gives_no_padj_and_brim_never_derives_one():
+    text = "motif,p_value\nStat3,0.001\nMyc,0.2\n"
+    table = _generic(text, column_map={"motif_name": "motif", "pvalue": "p_value"})
+    assert table.rows["padj"].isna().all() and table.record["no_padj_reported"] is True
+    assert table.rows["pvalue"].tolist() == [0.001, 0.2]
+    assert [w["code"] for w in table.warnings] == ["no_padj_reported"] and "does not adjust" in table.warnings[0]["message"]
+
+
+def test_invalid_probabilities_are_reported_with_line_numbers_at_most_five_at_a_time():
+    rows = [("A", "1.5", "0.1", "x"), ("B", "abc", "0.1", "x"), ("C", "inf", "0.1", "x"), ("D", "-0.1", "0.1", "x"),
+            ("E", "0.1", "2", "x"), ("F", "0.1", "0.1", "x"), ("G", "nan_text", "0.1", "x")]
+    with pytest.raises(mi.MotifImportError) as error:
+        _generic(generic_motif_csv(rows))
+    message = str(error.value)
+    assert "line 2: padj 1.5 is outside 0-1" in message and "line 3: padj 'abc' is not a number" in message
+    assert "line 4: padj 'inf' is not a finite number" in message and "and 1 more" in message
+    assert message.count("line ") == 5
+
+
+def test_empty_motif_names_and_empty_or_headerless_files_are_rejected():
+    with pytest.raises(mi.MotifImportError, match="motif name is empty"):
+        _generic(generic_motif_csv([("", "0.1", "0.1", "x")]))
+    with pytest.raises(mi.MotifImportError, match="empty"):
+        mi.read_motif_results(b"", "e.txt", "generic", column_map={"motif_name": "m", "padj": "q"})
+    with pytest.raises(mi.MotifImportError, match="no data rows"):
+        _generic("motif,q_value,p_value,peak_set\n")
+    with pytest.raises(mi.MotifImportError, match="tool must be"):
+        mi.read_motif_results(b"x", "x", "other")
+
+
+def test_size_and_row_limits_are_enforced(monkeypatch):
+    monkeypatch.setattr(mi, "MAX_IMPORT_BYTES", 200)
+    with pytest.raises(mi.MotifImportError, match="larger than"):
+        _homer()
+    monkeypatch.setattr(mi, "MAX_IMPORT_BYTES", 10 * 1024 * 1024)
+    monkeypatch.setattr(mi, "MAX_IMPORT_ROWS", 3)
+    with pytest.raises(mi.MotifImportError, match="more than 3 data rows"):
+        _homer()
+    assert len(_generic(generic_motif_csv([("A", "0.1", "0.1", "x")] * 3)).rows) == 3
+    monkeypatch.setattr(mi, "MAX_IMPORT_BYTES", 1024)
+    with pytest.raises(mi.MotifImportError, match="limit of 1,024 bytes"):
+        mi.read_motif_results(b"m,q\n" + b"a,0.1\n" * 400, "big.csv", "generic", column_map={"motif_name": "m", "padj": "q"})
+
+
+def test_encodings_are_detected_and_recorded_and_unreadable_files_are_rejected():
+    assert _homer().record["encoding"] == "utf-8-sig"
+    bom = mi.read_motif_results(b"\xef\xbb\xbf" + homer_known_text().encode("utf-8"), "k.txt", "homer_known")
+    assert bom.rows["motif_name"].iloc[0].startswith("Stat3") and bom.record["encoding"] == "utf-8-sig"       # BOM removed
+    japanese = generic_motif_csv([("転写因子A", "0.1", "0.01", "x")])
+    table = _generic(japanese, encoding="cp932")
+    assert table.record["encoding"] == "cp932" and table.rows["motif_name"].iloc[0] == "転写因子A"
+    with pytest.raises(mi.MotifImportError, match="not readable text"):
+        mi.read_motif_results(b"motif,q\n\x81\x20,0.1\n", "bad.csv", "generic", column_map={"motif_name": "motif", "padj": "q"})
+
+
+def test_delimiters_are_detected_and_unsupported_ones_get_a_helpful_message():
+    tab = generic_motif_csv(delimiter="\t")
+    assert _generic(tab).record["delimiter"] == "tab" and _generic().record["delimiter"] == "comma"
+    with pytest.raises(mi.MotifImportError, match="Semicolon"):
+        _generic("motif;q_value;p_value\nA;0.1;0.1\n")
+    with pytest.raises(mi.MotifImportError, match="tab or comma"):
+        _generic("motif q_value p_value\nA 0.1 0.1\n")
+
+
+def test_comments_and_blank_lines_are_skipped_and_line_numbers_stay_accurate():
+    text = "# a comment\n\nmotif,q_value,p_value,peak_set\nA,0.1,0.1,x\n\n# note\nB,0.2,0.2,x\n"
+    table = _generic(text)
+    assert table.rows["motif_name"].tolist() == ["A", "B"]
+    assert table.rows["source_line"].tolist() == [4, 7] and table.record["n_lines_skipped"] == 4
+
+
+def test_duplicate_motif_rows_are_all_kept():
+    table = _homer()
+    assert (table.rows["motif_name"].str.lower().str.startswith("stat3")).sum() == 3      # three Stat3 motifs stay as rows
+
+
+def test_file_names_are_reduced_to_a_safe_display_form():
+    long_name = "x" * 500 + ".txt"
+    assert len(_homer(name=long_name).record["file_name"]) == 200
+    assert _homer(name="C:\\Users\\me\\out\\knownResults.txt").record["file_name"] == "knownResults.txt"
+    assert _homer(name="../../etc/known\tResults.txt").record["file_name"] == "known_Results.txt"
+    assert _homer(name="").record["file_name"] == "unnamed"
+
+
+def test_non_numeric_percentages_are_kept_as_missing_and_do_not_stop_the_import():
+    rows = [row[:6] + ("n/a",) + row[7:] for row in HOMER_DEFAULT_ROWS]
+    table = _homer(homer_known_text(rows))
+    assert table.rows["pct_target"].isna().all() and table.rows["padj"].iloc[0] == 0.0001
+
+
+def test_homer_header_constant_matches_the_documented_required_columns():
+    assert set(mi.HOMER_REQUIRED_HEADERS) <= {h.lower() for h in HOMER_HEADER}
