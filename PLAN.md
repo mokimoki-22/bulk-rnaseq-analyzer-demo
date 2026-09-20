@@ -66,11 +66,16 @@
   参照を1行追記するか。監査役Cは不変条件本文を編集できない。「追記しない」場合は設計書§12.2の注記とA・BのGOが正となる。
   残存事項: DAR contrastのラベルは利用者入力で、入力誤りは検出できない（未指定・不一致は実行を拒否する）。ORA結果CSVは
   同一class再実行で最新に置き換わる（履歴は追記）。
-- **Phase 6 gate（未通過）:** Phase 6（motif/Level 3、外部motif結果のインポート）に着手するには、AGENTS.mdの
-  Phase transition audit gateに従い、Phase 5→6移行について監査役A・BのGOを得たうえで、監査役Cが計画の決定と着手を
-  記録する。Phase 6の計画書（`docs/phase6_implementation_plan.md`）はまだ存在しない。
-- **Next task:** Phase 5→6の移行監査を依頼する（計画のみ）。その前に、Windowsジョブの安定性確認（任意）を行うとよい。
-- **Do not start:** Phase 6の実装（motif/Level 3の操作・BED出力・インポート）。上記gateが記録されるまで着手しない。
+- **Phase 5→6 transition audit（2026-09-21）:** 監査役A・Bとも、Phase 6の**計画のみGO**、実装はNO-GO
+  （Aは論点20件、Bは質問8件と、別ブロック`tf_level3`・AppTest少数化・合成HOMER風fixtureの推奨を提示）。
+  監査役Cが全論点を決定し、`docs/phase6_implementation_plan.md`に記録した。Cが決定せず残したもの: AGENTS.md
+  不変条件本文の編集（ユーザー）、実際のHOMER出力・公式仕様との突合（Phase 7）、`dabbb32`のWindows 3.12失敗の原因特定。
+- **Phase 6 gate（未通過）:** 監査役A・Bが`docs/phase6_implementation_plan.md`にGOを発行し、監査役Cが着手を決定して
+  この節に記録するまで、Phase 6の実装に着手しない。計画書D14の2つの既存アサーション置換
+  （`tests/test_tf_integration_ui.py`のLevel 3不在の確認）が「有効なテストの弱体化」に当たらないことを、A・Bが
+  計画レビューで明示的に確認する（異議が出たらユーザーの判断を仰ぐ）。`cd0a2a4`（文書のみ）のCIは実行中で未確認。
+- **Next task:** `docs/phase6_implementation_plan.md`に対する監査役A・Bの計画レビュー。両者GOの後に、監査役Cが
+  着手を決定してこの節へ記録する。- **Do not start:** Phase 6の実装（motif/Level 3の操作・BED出力・インポート）。上記gateが記録されるまで着手しない。
   不変条件I-1〜I-6の変更・放棄、新規ネットワーク通信・依存関係、RNA-only workflowの変更（I-6.1）、
   既存テストの変更・削除。
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
