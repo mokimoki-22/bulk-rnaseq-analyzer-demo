@@ -43,9 +43,13 @@
   （A・B確認）。Level 1再実行時にORA・TF・motifのsession結果を消去するPhase 4挙動の変更は承認済み。
   Phase 5実装の完了は、実装後監査で監査役A・Bの両GO（コード・テスト・export/provenance・CI）を得るまで
   宣言しない。Phase 6へは進まない。
-- **Next task:** Phase 5実装を`docs/phase5_implementation_plan.md`§7の順序で行う。現在: ステップ1
-  （`tests/tf_support.py`と`brim_tf_integration.py`の純関数群、陰性対照の早期確認）。
-- **Do not start:** Phase 6（motif/Level 3の操作・BED出力・取り込み）。計画書§1「追加しないもの」の全項目。
+- **Phase 5 implementation status:** 計画書§7のステップ1〜7を実装した（`brim_tf_integration.py`、Integrationサブタブの
+  レベル2 UI、`tf_collectri_meta`とLevel 2専用の無効化、export・manifest、文書）。Level 1再実行でORA・Level 2・motifの
+  保存結果を消去するPhase 4挙動の変更（承認済み）も含む。ローカルの全体テストは184件成功、9件は既知のPyDESeq2
+  API不一致（Phase 5起因ではない）。陰性対照は固定seed 0で期待どおり（調整なし）。Level 3/motif、新規ネットワーク通信・
+  依存関係、RNA-only workflowの変更はない。
+- **Next task:** 計画書§7のステップ8: 本commitのGitHub Actions（4環境）を確認し、監査役A・Bの実装後監査を受ける。
+  両者GOの後にのみPhase 5を完了とする。- **Do not start:** Phase 6（motif/Level 3の操作・BED出力・取り込み）。計画書§1「追加しないもの」の全項目。
   不変条件I-1〜I-6の変更・放棄、新規ネットワーク通信・依存関係、RNA-only workflowの変更（I-6.1）、
   既存テストの変更・削除。
 

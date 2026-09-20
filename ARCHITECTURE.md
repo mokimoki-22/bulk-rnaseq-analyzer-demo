@@ -165,19 +165,38 @@ Humanは同梱KEGG/GO-BPを、Mouseは同梱KEGGのみを利用する。Mouse GO
 TF候補の推定と、外部motif結果の統合。
 
 ```python
-build_universe(edges, rna) -> set[str]
-test_target_enrichment(gene_set, universe, tf_network) -> pd.DataFrame
-attach_tf_expression(tf_table, deg_results) -> pd.DataFrame
-attach_tf_activity(tf_table, tf_activity_results) -> pd.DataFrame
+# Phase 5（実装済み。Level 1の遺伝子summaryを入力とし、Streamlit・session_stateを使わない）
+build_universe(summary) -> list[str]            # brim_integration_enrichment.build_ora_background と同一
+describe_universe(summary) -> dict
+resolve_gene_set(summary, set_name, universe) -> tuple[list[str], int]
+build_target_sets(network, universe, min_targets) -> tuple[dict, dict]
+benjamini_hochberg(pvalues) -> np.ndarray
+test_target_enrichment(gene_set, universe, network, min_targets, network_source, set_name) -> pd.DataFrame
+attach_tf_expression(tf_table, rna_results, thresholds) -> pd.DataFrame
+attach_tf_activity(tf_table, activity_scores, sample_conditions, reference, test, source) -> pd.DataFrame
+add_motif_placeholder(tf_table) -> pd.DataFrame  # motif軸は常に not_run
+count_supported_axes(tf_table, alpha) -> pd.DataFrame  # 表示専用。統計量ではない（I-1.3）
+compute_fingerprints(...) -> dict                # 古い結果の検出（I-6.2）
+run_level2(...) -> dict
+combine_tf_tables(runs) -> pd.DataFrame
+get_tf_targets_in_set(tf_symbol, gene_set, network, edges) -> pd.DataFrame
+build_tf_summary(runs, network_info) -> dict
+# Phase 6（未実装）
 read_motif_results(file_obj, tool, column_map) -> pd.DataFrame
 normalize_tf_symbols(motif_df, species) -> tuple[pd.DataFrame, UnmatchedReport]
 attach_motif_enrichment(tf_table, motif_df, peak_set) -> pd.DataFrame
-build_tf_summary(tf_table, settings) -> dict
 ```
 
+Phase 5では、標的濃縮はCollecTRIのみ、背景はPhase 4のORA背景と同一、Fisherは片側、BH補正は選択した1つの
+遺伝子集合内に限る。詳細な決定は`docs/phase5_implementation_plan.md`を参照する。
+
 TF network の取得は既存 `brim_tf_networks.py` の
-`load_collectri_network` / `load_dorothea_network` を再利用する。
+`load_collectri_network` を再利用する（`load_dorothea_network`は使用しない）。
 TF activity の推定は既存 `infer_tf_activity` の結果を受け取るのみで、再計算しない。
+UIは`Bulk_RNAseq_Analyzer.py`のIntegrationサブタブに置き、TF Activity実行時の条件は`tf_collectri_meta`に記録する。
+Level 1再実行、または上流（RNA・ATAC・閾値・contrast・種・mapping・入力）の変更では、ORAとLevel 2の結果を
+`reset_tf_integration_results()`で消去する。TF Activityの再推定だけの場合は、`invalidate_tf_level2_results()`で
+Level 2の結果のみを消去する（ORAは保持）。
 
 ### 3.5 `brim_provenance.py`（Phase 0.5）
 

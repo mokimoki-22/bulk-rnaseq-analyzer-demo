@@ -7,6 +7,11 @@
 
 ### Added
 
+- Phase 5: Integrationサブタブにレベル2（TF候補）を追加。同梱CollecTRIの標的濃縮（Fisher正確検定の片側、BH補正は
+  選択した遺伝子集合内）、TF発現、TF activityを別々の列で表示し、motif列は「未実行」。背景遺伝子はORAと同一で、定義と
+  件数を表示・記録する。`Integration/tf_candidates.csv`・`tf_summary.json`とmanifestの`tf_level2`を出力する。
+  TF Activity実行時の条件を`tf_collectri_meta`に記録し、古いLevel 2結果は描画時・export時に検出して消去する。
+  新規ネットワーク通信・依存関係なし。テストは決定的な合成データ（仕込みTF、陰性対照）で行い、実データでの生物学的検証ではない。
 - Phase 3/4: `Multi-omics`内に`Integration`サブタブを追加。RNA/ATACの構造化contrast
   （reference/test）が一致しない、または未指定の場合は実行しない。gene-summary quadrantと
   除外理由、evidence table（gene/edge単位）、class別ローカルORA（Human GO/KEGG、
@@ -38,6 +43,8 @@
 
 ### Changed
 
+- Phase 4のIntegrationでLevel 1を再実行すると、ORA・レベル2・motifの保存結果も消去される（以前は再実行後もORA結果が
+  残り、ORA履歴だけが空になっていた不整合の修正）。ORAの計算・export名は変更していない。
 - Fixed the pinned GENCODE generation-script checksum check on Windows.  The
   script is now checked out with LF line endings through `.gitattributes`,
   because the manifest records a byte-level SHA-256.  Ubuntu already checked

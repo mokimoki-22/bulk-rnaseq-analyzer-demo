@@ -857,6 +857,17 @@ RNA log2FCとATAC log2FCの相関は探索的指標としてのみ表示する�
 
 背景の定義と件数を結果画面へ表示する。
 
+**Phase 5実装での明確化（監査役C決定、監査役A・B確認、2026-09-20）**
+
+レベル2の背景は、Phase 4のORA背景と同一の「RNAのpadjとlog2FCがともに検定済み（NAでない）で、検定済みATAC peakが
+1つ以上対応付いた遺伝子（分類可能な対応付き遺伝子）」とする。`not_significant`の遺伝子を含み、全遺伝子でも
+DEGのみでもない。上の「mapされ、かつRNA側で検定された」を、本節の理由（分類できない遺伝子を背景に含めない）に
+沿って、検定済みpeakを持つ遺伝子に限ると読む。字義どおりの「mapされ、かつRNA検定済み」の件数
+（`n_mapped_rna_tested`）と、ATAC未検定のため除外した件数を、背景の件数と併せて結果画面とmanifestへ記録する。
+検定はFisher正確検定の片側（過剰表現、`greater`）とし、TFの標的は背景に制限する。BH補正は選択した1つの遺伝子集合の
+内側で、検定したTF（背景内ターゲット数が下限以上）のみを対象に行い、複数の遺伝子集合を見ることの多重性は補正しない
+（探索的）。詳細は`docs/phase5_implementation_plan.md`を参照する。
+
 **多重検定補正**
 
 CollecTRIは数百のTFを含むため、BH法で補正する。このpadjはレベル1の分類を入力とする新規の検定であり、RNAおよびATACのpadjとは独立である。結果画面とドキュメントの双方でこの点を明示し、レベル1のpadjと混同させない。
@@ -1018,14 +1029,26 @@ build_integration_summary(edges, genes, settings) -> dict
 ### 14.3 `brim_tf_integration.py`
 
 ```python
-build_universe(edges, rna) -> set[str]
-test_target_enrichment(gene_set, universe, tf_network) -> pd.DataFrame
-attach_tf_expression(tf_table, deg_results) -> pd.DataFrame
-attach_tf_activity(tf_table, tf_activity_results) -> pd.DataFrame
+build_universe(summary) -> list[str]        # Phase 5: Level 1 gene summary（§12.2の明確化）
+describe_universe(summary) -> dict
+resolve_gene_set(summary, set_name, universe) -> tuple[list[str], int]
+build_target_sets(network, universe, min_targets) -> tuple[dict, dict]
+benjamini_hochberg(pvalues) -> np.ndarray
+test_target_enrichment(gene_set, universe, network, min_targets, network_source, set_name) -> pd.DataFrame
+attach_tf_expression(tf_table, rna_results, thresholds) -> pd.DataFrame
+attach_tf_activity(tf_table, activity_scores, sample_conditions, reference, test, source) -> pd.DataFrame
+add_motif_placeholder(tf_table) -> pd.DataFrame          # Phase 5: motif軸は常に not_run
+count_supported_axes(tf_table, alpha) -> pd.DataFrame
+compute_fingerprints(summary, thresholds, contrasts, activity_scores, activity_meta, sample_conditions) -> dict
+run_level2(summary, set_name, network, rna_results, thresholds, contrasts, activity_scores,
+           sample_conditions, min_targets, alpha, network_source, activity_meta) -> dict
+combine_tf_tables(runs) -> pd.DataFrame
+get_tf_targets_in_set(tf_symbol, gene_set, network, edges) -> pd.DataFrame
+build_tf_summary(runs, network_info) -> dict
+# 以下はPhase 6（未実装）
 read_motif_results(file_obj, tool, column_map) -> pd.DataFrame
 normalize_tf_symbols(motif_df, species) -> tuple[pd.DataFrame, UnmatchedReport]
 attach_motif_enrichment(tf_table, motif_df, peak_set) -> pd.DataFrame
-build_tf_summary(tf_table, settings) -> dict
 ```
 
 ### 14.4 `brim_provenance.py`

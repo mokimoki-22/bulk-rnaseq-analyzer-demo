@@ -16,6 +16,7 @@ import brim_atac
 import brim_integration_enrichment
 import brim_multiomics
 import brim_provenance
+import brim_tf_integration
 from scipy import stats
 from sklearn.decomposition import PCA
 from statsmodels.stats.multitest import multipletests
@@ -199,6 +200,7 @@ if "enr_go"       not in st.session_state: st.session_state["enr_go"]       = No
 if "gsea_results" not in st.session_state: st.session_state["gsea_results"] = None
 if "tf_results"   not in st.session_state: st.session_state["tf_results"]   = None
 if "tf_collectri" not in st.session_state: st.session_state["tf_collectri"] = None
+if "tf_collectri_meta" not in st.session_state: st.session_state["tf_collectri_meta"] = None
 if "tf_dorothea"  not in st.session_state: st.session_state["tf_dorothea"]  = None
 if "ciber_results" not in st.session_state: st.session_state["ciber_results"] = None
 if "fig_font_sz"  not in st.session_state: st.session_state["fig_font_sz"]  = 12
@@ -288,6 +290,7 @@ _DATA_RESULT_DEFAULTS = {
     "gsea_object": None,
     "tf_results": None,
     "tf_collectri": None,
+    "tf_collectri_meta": None,
     "tf_dorothea": None,
     "ciber_results": None,
     "venn_deg_sets": None,
@@ -311,8 +314,19 @@ def reset_data_results():
     reset_integration_results()
 
 
+def invalidate_tf_level2_results():
+    """Clear only the Level 2 TF results and their provenance copy, leaving Level 1 ORA untouched."""
+    st.session_state["integration_tf_results"] = None
+    provenance = st.session_state.get("integration_provenance")
+    if isinstance(provenance, dict):
+        st.session_state["integration_provenance"] = {
+            key: value for key, value in provenance.items() if key != "tf_level2"
+        }
+
+
 def reset_tf_integration_results():
-    """Clear future level-2/3 outputs after an upstream ATAC/RNA change."""
+    """Clear level-2/3 outputs (and the ORA results) after an upstream ATAC/RNA change."""
+    invalidate_tf_level2_results()
     for key in ("integration_enrichment", "integration_tf_results", "integration_motif_results",
                 "integration_motif_source"):
         st.session_state[key] = None
@@ -374,7 +388,7 @@ def reset_contrast_results(clear_rna_contrast=True):
     """Clear outputs that depend on the currently selected DEG contrast."""
     for key in (
         "enr_kegg", "enr_go", "gsea_results", "gsea_object",
-        "tf_results", "tf_collectri", "tf_dorothea", "ciber_results",
+        "tf_results", "tf_collectri", "tf_collectri_meta", "tf_dorothea", "ciber_results",
         "custom_gene_list",
     ):
         st.session_state[key] = [] if key == "custom_gene_list" else None
@@ -1139,6 +1153,16 @@ def collect_all_results():
     integration_summary = st.session_state.get("integration_summary")
     integration_provenance = st.session_state.get("integration_provenance")
     if integration_edges is not None and integration_genes is not None:
+        # Level 2 is exported only from results whose inputs are still current (I-6.2), and its provenance block
+        # is built from those results alone, never from a stale copy kept beside the Level 1 provenance.
+        exported_provenance = {key: value for key, value in (integration_provenance or {}).items()
+                               if key != "tf_level2"}
+        tf_runs, _tf_stale = _current_tf_level2_runs(integration_genes)
+        if tf_runs:
+            tf_block = brim_tf_integration.build_tf_summary(tf_runs, next(iter(tf_runs.values()))["network_info"])
+            files["Integration/tf_candidates.csv"] = brim_tf_integration.combine_tf_tables(tf_runs).to_csv(index=False)
+            files["Integration/tf_summary.json"] = json.dumps(tf_block, indent=2, ensure_ascii=False, allow_nan=False)
+            exported_provenance["tf_level2"] = tf_block
         files["Integration/integration_edges.csv"] = integration_edges.to_csv(index=False)
         files["Integration/gene_summary.csv"] = integration_genes.to_csv(index=False)
         files["Integration/summary.json"] = json.dumps(
@@ -1146,7 +1170,7 @@ def collect_all_results():
         )
         files["Integration/analysis_notebook.md"] = (
             "# Level 1 Integration Notebook\n\n"
-            + json.dumps(integration_provenance or {}, indent=2, ensure_ascii=False, allow_nan=False)
+            + json.dumps(exported_provenance, indent=2, ensure_ascii=False, allow_nan=False)
             + "\n"
         )
         enrichment = st.session_state.get("integration_enrichment") or {}
@@ -1164,7 +1188,7 @@ def collect_all_results():
                 if isinstance(result_frame, pd.DataFrame):
                     files[f"Integration/ORA/{integration_class}_{library_type}.csv"] = result_frame.to_csv(index=False)
         files["Integration/ORA/history.json"] = json.dumps(ora_history, indent=2, ensure_ascii=False, allow_nan=False)
-        settings["integration"] = integration_provenance
+        settings["integration"] = exported_provenance if integration_provenance is not None or tf_runs else None
         counts["integration"] = {
             "edge_count": int(len(integration_edges)), "gene_count": int(len(integration_genes)),
             "gene_classes": (integration_summary or {}).get("gene_classes", {}), "ora_history": ora_history,
@@ -2006,12 +2030,206 @@ def _integration_plot_exclusions(genes):
     }
 
 
+def _tf_activity_inputs():
+    """Return the stored TF activity matrix, its recorded run parameters and the sample condition labels.
+
+    Without recorded run parameters (an older session) the activity result is not used by Level 2, so both
+    the run and the staleness check see it as absent.
+    """
+    metadata = st.session_state.get("metadata")
+    conditions = metadata["condition"] if metadata is not None and "condition" in metadata else None
+    activity, meta = st.session_state.get("tf_collectri"), st.session_state.get("tf_collectri_meta")
+    if meta is None:
+        activity = None
+    return activity, meta, conditions
+
+
+def _tf_level2_fingerprints(genes):
+    """Fingerprint the inputs of a stored Level 2 result, from the Level 1 run settings (not live widgets)."""
+    settings = st.session_state["integration_settings"]
+    activity, meta, conditions = _tf_activity_inputs()
+    return brim_tf_integration.compute_fingerprints(
+        genes, settings["thresholds"], settings["rna_contrast"], activity, meta, conditions
+    )
+
+
+def _current_tf_level2_runs(genes):
+    """Return (runs, reason): the stored Level 2 runs only if their inputs are still current (I-6.2).
+
+    ``reason`` is None when the runs are current, "input" when the Level 1 result changed and
+    "activity" when only the TF activity result changed.  The stored state is not modified here.
+    """
+    runs = st.session_state.get("integration_tf_results")
+    if not runs or st.session_state.get("integration_settings") is None:
+        return None, None
+    stored = next(iter(runs.values()))["fingerprints"]
+    current = _tf_level2_fingerprints(genes)
+    if stored["input_fingerprint"] != current["input_fingerprint"]:
+        return None, "input"
+    if stored["activity_fingerprint"] != current["activity_fingerprint"]:
+        return None, "activity"
+    return runs, None
+
+
+def _tf_level2_display_table(table, lang):
+    """Prepare the Level 2 table for display: separate axes, "not run" markers, no combined score."""
+    shown = table.copy()
+    not_run = ui("not run", lang, "未実行")
+    for column in ("tf_activity_status", "motif_status"):
+        shown[column] = shown[column].replace({"not_run": not_run})
+    shown["supported / evaluable axes"] = (
+        shown["n_axes_supported"].astype(str) + " / " + shown["n_axes_evaluable"].astype(str)
+    )
+    columns = [
+        "tf_symbol", "supported / evaluable axes",
+        "n_targets_in_set", "n_targets_in_universe", "fold_enrichment", "target_enrichment_p",
+        "target_enrichment_padj",
+        "tf_expression_status", "tf_rna_log2FoldChange", "tf_rna_padj",
+        "tf_activity_status", "tf_activity_score",
+        "motif_status",
+    ]
+    return shown.loc[:, columns]
+
+
+def _render_tf_level2_ui(genes, edges, lang):
+    """Level 2 TF candidates (Phase 5): explicit run, three separate axes, motif axis shown as not run."""
+    st.divider()
+    st.subheader(ui("Level 2: TF candidates", lang, "レベル2: TF候補"))
+    settings = st.session_state["integration_settings"]
+    runs, stale_reason = _current_tf_level2_runs(genes)
+    if stale_reason == "input":
+        reset_tf_integration_results()
+        st.warning(ui("Level 2 results were cleared because the Level 1 result changed; run Level 2 again.", lang,
+                      "レベル1の結果が変わったため、レベル2の結果を消去しました。再実行してください。"))
+    elif stale_reason == "activity":
+        invalidate_tf_level2_results()
+        st.warning(ui("Level 2 results were cleared because the TF Activity result changed; run Level 2 again.", lang,
+                      "TF Activity結果が変わったため、レベル2の結果を消去しました。再実行してください。"))
+    st.caption(ui(
+        "Level 2 lists TF candidates from RNA-seq and curated regulatory databases, using the Level 1 gene sets. "
+        "The three evidence columns stay separate.", lang,
+        "レベル2は、レベル1の遺伝子集合をもとに、RNA-seqとキュレーション済み制御データベースからTF候補を示します。"
+        "3つの根拠の列は分けて表示します。",
+    ))
+    blockers = []
+    if settings.get("rna_gene_id_type") != "gene_symbol":
+        blockers.append(ui("Level 2 needs Level 1 to be run with the gene symbol identifier.", lang,
+                           "レベル2は、レベル1を遺伝子シンボルで実行した場合にのみ実行できます。"))
+    if settings.get("species") not in ("Human", "Mouse"):
+        blockers.append(ui("Level 2 supports Human and Mouse only.", lang, "レベル2はHumanとMouseのみ対応します。"))
+    for message in blockers:
+        st.info(message)
+    universe = brim_tf_integration.describe_universe(genes)
+    st.caption(ui(
+        f"{universe['universe_definition']} Background size: {universe['universe_size']}; mapped and RNA-tested "
+        f"(literal count): {universe['n_mapped_rna_tested']}; excluded because ATAC was not tested: "
+        f"{universe['n_excluded_atac_not_tested']}; RNA-only without a mapped peak: "
+        f"{universe['n_rna_only_no_mapped_peak']}; RNA not tested: {universe['n_rna_not_tested']}.", lang,
+        f"{universe['universe_definition_ja']} 背景遺伝子数: {universe['universe_size']}; 対応付き・RNA検定済み"
+        f"（字義どおりの件数）: {universe['n_mapped_rna_tested']}; ATAC未検定のため除外: "
+        f"{universe['n_excluded_atac_not_tested']}; peak対応なしのRNAのみ: {universe['n_rna_only_no_mapped_peak']}; "
+        f"RNA未検定: {universe['n_rna_not_tested']}。",
+    ))
+    controls = st.columns(3)
+    set_name = controls[0].selectbox(ui("Gene set", lang, "遺伝子集合"), list(brim_tf_integration.SET_DEFINITIONS),
+                                     key="tf_level2_set")
+    min_targets = controls[1].slider(ui("Min. targets in the background per TF", lang, "TFごとの背景内ターゲット数の下限"),
+                                     5, 30, 10, key="tf_level2_min_targets")
+    alpha = controls[2].selectbox(ui("Target-enrichment padj threshold", lang, "標的濃縮のpadj閾値"),
+                                  [0.01, 0.05, 0.1], index=1, key="tf_level2_alpha")
+    activity, meta, _conditions = _tf_activity_inputs()
+    if activity is None and st.session_state.get("tf_collectri") is not None:
+        st.caption(ui("The stored TF Activity result has no recorded run parameters, so it is not used: the activity "
+                      "column will show \"not run\". Run TF Activity again in the TF tab, then run Level 2 again.", lang,
+                      "保存されているTF Activity結果には実行時のパラメータの記録がないため使用しません。activity列は"
+                      "「未実行」になります。TFタブでTF Activityを再実行してから、レベル2を再実行してください。"))
+    elif activity is None:
+        st.caption(ui("TF Activity has not been run: the activity column will show \"not run\". Run TF Activity in the "
+                      "TF tab, then run Level 2 again.", lang,
+                      "TF Activityが未実行のため、activity列は「未実行」になります。TFタブでTF Activityを実行してから、"
+                      "レベル2を再実行してください。"))
+    if st.button(ui("Run Level 2 TF candidates", lang, "レベル2 TF候補を実行"), key="tf_level2_run",
+                 disabled=bool(blockers)):
+        organism = "human" if settings["species"] == "Human" else "mouse"
+        if activity is not None and meta.get("organism") != organism:
+            st.error(ui("TF Activity was estimated for a different species. Run TF Activity again in the TF tab.", lang,
+                        "TF Activityは別の生物種で推定されています。TFタブで再実行してください。"))
+        else:
+            try:
+                network = load_collectri_network(organism)
+                rna_results = brim_multiomics.standardize_rna_results(st.session_state["deg_results"], "gene_symbol")
+                run = brim_tf_integration.run_level2(
+                    genes, set_name, network, rna_results, settings["thresholds"], settings["rna_contrast"],
+                    activity, _conditions if activity is not None else None, min_targets, float(alpha),
+                    network_source="collectri", activity_meta=meta if activity is not None else None,
+                )
+                run["network_info"] = {
+                    "source": "collectri", "organism": organism, "n_edges": int(len(network)),
+                    "file": f"references/tf_networks/collectri_{organism}.csv.gz",
+                }
+                stored = dict(st.session_state.get("integration_tf_results") or {})
+                stored[set_name] = run
+                st.session_state["integration_tf_results"] = stored
+                provenance = dict(st.session_state.get("integration_provenance") or {})
+                provenance["tf_level2"] = brim_tf_integration.build_tf_summary(stored, run["network_info"])
+                st.session_state["integration_provenance"] = provenance
+                log_analysis("Level 2 TF candidates", f"Gene set: {set_name}; CollecTRI; local network only.")
+            except (brim_multiomics.IntegrationError, ValueError) as error:
+                st.error(str(error))
+    runs, _ = _current_tf_level2_runs(genes)
+    st.markdown("**" + ui("Limitations", lang, "限界") + "**")
+    limits = brim_tf_integration.LIMITATIONS_JA if lang == "ja" else brim_tf_integration.LIMITATIONS_EN
+    st.markdown("\n".join(f"- {sentence}" for sentence in limits))
+    run = (runs or {}).get(set_name)
+    if run is None:
+        st.info(ui("Level 2 has not been run for this gene set.", lang, "この遺伝子集合ではレベル2が未実行です。"))
+        return
+    if run["status"] == "empty_gene_set":
+        st.warning(ui(run["message"], lang, run["message_ja"]))
+        return
+    if run["gene_set"]["small_gene_set_warning"]:
+        st.warning(ui("Exploratory: fewer than 20 genes in the selected gene set.", lang,
+                      "探索的: 選択した遺伝子集合が20遺伝子未満です。"))
+    if set_name == "mixed_accessibility":
+        st.info(ui(brim_integration_enrichment.DIRECTION_AGNOSTIC_NOTE, lang,
+                   brim_integration_enrichment.DIRECTION_AGNOSTIC_NOTE_JA))
+    st.caption(ui(run["bh_scope_note"], lang, run["bh_scope_note_ja"]) + " " + ui(
+        f"Tests: {run['n_tests']}; TFs below the minimum target count (not tested): {run['n_tfs_below_min_targets']}; "
+        f"genes in the set: {run['gene_set']['n_genes']} (removed outside the background: "
+        f"{run['gene_set']['n_removed_outside_universe']}).", lang,
+        f"検定数: {run['n_tests']}; ターゲット数が下限未満で検定しなかったTF: {run['n_tfs_below_min_targets']}; "
+        f"集合の遺伝子数: {run['gene_set']['n_genes']}（背景外で除いた数: {run['gene_set']['n_removed_outside_universe']}）。",
+    ))
+    st.caption(ui(
+        "Activity 'separated_up/separated_down' is a descriptive rule without a p-value; about 10% of null TFs pass it "
+        "with 3 vs 3 samples. Motif enrichment: not run (Level 3 is not available in this version). "
+        "The number of supported axes is a sorting aid, not a statistic.", lang,
+        "activityの「separated_up/separated_down」はp値を伴わない記述的な規則で、3 vs 3では帰無のTFの約10%が通過します。"
+        "motif濃縮: 未実行（レベル3はこの版では利用できません）。支持軸数は並べ替えの補助であり、統計量ではありません。",
+    ))
+    table = run["table"]
+    st.dataframe(_tf_level2_display_table(table, lang), use_container_width=True)
+    if table.empty:
+        return
+    tf_symbol = st.selectbox(ui("TF drill-down", lang, "TFの詳細"), list(table["tf_symbol"]), key="tf_level2_drill_tf")
+    hits = table.loc[table["tf_symbol"] == tf_symbol, "targets_in_set"].iloc[0]
+    st.dataframe(
+        brim_tf_integration.get_tf_targets_in_set(tf_symbol, hits, load_collectri_network(run["network_info"]["organism"]), edges),
+        use_container_width=True,
+    )
+
+
 def _render_integration_ui(lang):
-    """Render only approved Phase 4 Level 1 integration controls and results."""
+    """Render the Phase 4 Level 1 and Phase 5 Level 2 integration controls and results."""
     st.header(ui("RNA–ATAC integration (Level 1)", lang, "RNA–ATAC統合解析（レベル1）"))
     st.caption(ui(
         "Compare expression and accessibility evidence. This view does not establish causation.", lang,
         "発現とaccessibilityの根拠を比較します。この表示は因果関係を示すものではありません。",
+    ))
+    st.caption(ui(
+        "Level 1: RNA–ATAC comparison → Level 2: TF candidates (after Level 1). "
+        "Level 3 (motif) is not available in this version.", lang,
+        "レベル1: RNA–ATAC比較 → レベル2: TF候補（レベル1の後）。レベル3（motif）はこの版では利用できません。",
     ))
     gene_id_type = st.radio(
         ui("RNA identifier used for matching", lang, "照合に使うRNA識別子"),
@@ -2065,6 +2283,8 @@ def _render_integration_ui(lang):
                 "unit": "gene_summary", "total_genes": int(len(genes)),
                 "plotted_genes": int(len(plotted)), "exclusions": plot_exclusions,
             }
+            # A new Level 1 result invalidates every downstream result (I-6.2): ORA, Level 2 and motif.
+            reset_tf_integration_results()
             st.session_state["integration_edge_results"] = classified
             st.session_state["integration_gene_results"] = genes
             st.session_state["integration_settings"] = settings
@@ -2126,6 +2346,7 @@ def _render_integration_ui(lang):
     available_classes = sorted(set(genes["integration_class"]).intersection(brim_integration_enrichment.ORA_CLASSES))
     if not available_classes:
         st.info(ui("No eligible Level 1 class is available for ORA.", lang, "ORA対象のレベル1classがありません。"))
+        _render_tf_level2_ui(genes, edges, lang)
         return
     ora_class = st.selectbox(ui("Integration class", lang, "統合class"), available_classes, key="integration_ora_class")
     if st.button(ui("Run local ORA", lang, "ローカルORAを実行"), key="integration_run_ora"):
@@ -2174,6 +2395,7 @@ def _render_integration_ui(lang):
                            f"{library_type}: ローカル経路との重複は見つかりませんでした。"))
             else:
                 st.info(ui(library_result["reason"], lang, library_result.get("reason_ja", library_result["reason"])))
+    _render_tf_level2_ui(genes, edges, lang)
 
 
 tab_upload, tab_deg, tab_multiomics, tab_viz, tab_network, tab_meta, tab_export, tab_info = st.tabs([
@@ -2311,6 +2533,7 @@ with tab_upload:
         if _previous_norm_method is not None and _previous_norm_method != _norm_sel:
             st.session_state["tf_results"] = None
             st.session_state["tf_collectri"] = None
+            st.session_state["tf_collectri_meta"] = None
             st.session_state["tf_dorothea"] = None
         st.session_state["analysis_norm_method"] = _norm_sel
         _norm_desc = {
@@ -2354,6 +2577,7 @@ with tab_upload:
                         st.session_state["gene_lengths"] = _validated_lengths
                         st.session_state["tf_results"] = None
                         st.session_state["tf_collectri"] = None
+                        st.session_state["tf_collectri_meta"] = None
                         st.session_state["tf_dorothea"] = None
                         st.success(ui("✅ Gene lengths loaded for {count} genes.", lang,
                                       count=len(st.session_state['gene_lengths'])))
@@ -5070,6 +5294,11 @@ Estimates transcription factor (TF) activity from gene expression data. Rather t
                         status.update(label="✅ TF Activity Estimation Complete!", state="complete", expanded=False)
 
                     st.session_state["tf_collectri"] = acts_c
+                    # Run-time parameters for Level 2 provenance; the widgets above can change after the run.
+                    st.session_state["tf_collectri_meta"] = {
+                        "method_requested": method_sel, "method_used": method_c, "tmin": int(min_targets),
+                        "normalization": _norm_method_tf, "organism": organism, "network": "collectri",
+                    }
                     st.session_state["tf_dorothea"]  = acts_d
 
                     if acts_d.shape[1] < 5:

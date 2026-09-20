@@ -227,8 +227,8 @@ def add_motif_placeholder(tf_table) -> pd.DataFrame      # motif_status="not_run
 def count_supported_axes(tf_table, alpha) -> pd.DataFrame  # n_axes_evaluable追加、並べ替え（D6）
 def get_tf_targets_in_set(tf_symbol, gene_set, network, edges) -> pd.DataFrame  # drill-down。edge行を保持（I-2.1）
 def compute_fingerprints(summary, thresholds, contrasts, activity_scores) -> dict
-def run_level2(summary, edges, set_name, network, rna_results, thresholds, contrasts,
-               activity_scores, sample_groups, min_targets, alpha) -> dict
+def run_level2(summary, set_name, network, rna_results, thresholds, contrasts,
+               activity_scores, sample_conditions, min_targets, alpha, network_source, activity_meta) -> dict   # 実装: edgesは不要（drill-downのみ）
 def build_tf_summary(tf_table, settings) -> dict          # manifestブロック（D8）
 UNIVERSE_DEFINITION / _JA, LIMITATIONS_EN / _JA, BH_SCOPE_NOTE / _JA
 ```
