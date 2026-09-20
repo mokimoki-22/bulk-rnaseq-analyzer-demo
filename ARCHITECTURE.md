@@ -109,7 +109,7 @@ run_dar(counts_df, metadata, ref_condition, test_condition,
         size_factors=None) -> pd.DataFrame
 read_dar_table(file_obj, sep, padj_threshold, lfc_threshold,
                coordinate_system, column_map=None) -> pd.DataFrame
-read_peak_gene_mapping(file_obj, sep, peaks) -> pd.DataFrame
+read_peak_gene_mapping(file_obj, sep, peaks, coordinate_system=None) -> pd.DataFrame
 validate_dar_table(df, coordinate_system, padj_threshold,
                    lfc_threshold) -> ValidationResult
 standardize_chromosomes(df, build) -> tuple[pd.DataFrame, TransformLog]

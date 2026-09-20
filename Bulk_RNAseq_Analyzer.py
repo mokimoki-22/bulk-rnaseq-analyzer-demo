@@ -1628,6 +1628,13 @@ def _render_atac_annotation_controls(lang):
             ui("User mapping delimiter", lang, "user mappingの区切り文字"), ["CSV", "TSV"],
             key="atac_user_mapping_separator", on_change=reset_peak_mapping_results,
         ))
+        user_mapping_coordinates = st.selectbox(
+            ui("User mapping coordinate system", lang, "user mappingの座標系"),
+            ["peak_id", "0-based", "1-based"], key="atac_user_mapping_coordinate_system",
+            format_func=lambda value: ui("Not applicable: standardized peak_id", lang, "該当なし: 標準化済みpeak_id")
+            if value == "peak_id" else ("0-based half-open" if value == "0-based" else "1-based closed"),
+            on_change=reset_peak_mapping_results,
+        )
         user_signature = _atac_uploaded_signature(user_mapping, "peak_gene_mapping")
         if user_signature != st.session_state.get("atac_user_mapping_signature"):
             reset_peak_mapping_results()
@@ -1642,8 +1649,10 @@ def _render_atac_annotation_controls(lang):
                 standardized.attrs["transforms"] = list(results.attrs.get("transforms", ())) + [asdict(transform)]
                 genes = brim_atac.load_gene_annotation(build)
                 user_edges = (
-                    brim_atac.read_peak_gene_mapping(user_mapping, user_mapping_separator, standardized)
-                    if user_mapping is not None else None
+                    brim_atac.read_peak_gene_mapping(
+                        user_mapping, user_mapping_separator, standardized,
+                        None if user_mapping_coordinates == "peak_id" else user_mapping_coordinates,
+                    ) if user_mapping is not None else None
                 )
                 promoter_edges = brim_atac.map_peaks_to_promoters(standardized, genes, upstream, downstream)
                 nearest_edges = brim_atac.map_peaks_to_nearest_tss(standardized, genes, maximum_distance)
@@ -1657,7 +1666,20 @@ def _render_atac_annotation_controls(lang):
                 st.session_state["atac_mapping_settings"] = settings
                 st.session_state["atac_qc_summary"] = brim_atac.summarize_atac_qc(standardized, edges, settings)
                 st.session_state["atac_reference_metadata"] = dict(genes.attrs["reference"])
-                st.session_state["atac_applied_user_mapping"] = st.session_state.get("atac_user_mapping_provenance")
+                if user_edges is not None:
+                    mapping_provenance = dict(st.session_state["atac_user_mapping_provenance"])
+                    mapping_provenance.update({
+                        "coordinate_system": user_edges.attrs["coordinate_system"],
+                        "transform_log": user_edges.attrs["transforms"],
+                        "matched_peaks": int(user_edges["peak_id"].nunique()),
+                        "mapping_edges": int(len(user_edges)),
+                    })
+                    st.session_state["atac_applied_user_mapping"] = mapping_provenance
+                    report = dict(st.session_state["atac_validation_report"])
+                    report["user_mapping"] = mapping_provenance
+                    st.session_state["atac_validation_report"] = report
+                else:
+                    st.session_state["atac_applied_user_mapping"] = None
                 st.success(ui("Peak annotation completed.", lang, "peakアノテーションが完了しました。"))
             except brim_atac.ATACError as error:
                 st.error(str(error))

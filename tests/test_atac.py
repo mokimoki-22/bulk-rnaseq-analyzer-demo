@@ -558,3 +558,30 @@ def test_user_peak_gene_mapping_preserves_external_evidence_and_priority():
     assert merged.loc[0, "mapping_methods"] == ["user_provided", "promoter"]
     assert merged.loc[0, "user_mapping_score"] == 0.91
     assert merged.loc[0, "user_mapping_source"] == "custom-map"
+
+
+@pytest.mark.parametrize(
+    ("coordinate_system", "start", "expected_transform"),
+    [("0-based", 100, False), ("1-based", 101, True)],
+)
+def test_user_mapping_coordinates_require_explicit_system_and_match_standard_dar(
+        coordinate_system, start, expected_transform):
+    peaks = pd.DataFrame({
+        "peak_id": ["chr1:100-200"], "chrom": ["chr1"], "start": [100], "end": [200],
+        "log2FoldChange": [1.5], "padj": [0.01], "padj_is_na": [False], "lfc_is_na": [False],
+    })
+    mapping = brim_atac.read_peak_gene_mapping(
+        io.StringIO(f"chrom,start,end,gene\nchr1,{start},200,G1\n"), ",", peaks, coordinate_system,
+    )
+    assert mapping["peak_id"].tolist() == ["chr1:100-200"]
+    assert mapping.attrs["coordinate_system"] == coordinate_system
+    assert bool(mapping.attrs["transforms"]) is expected_transform
+
+
+def test_user_mapping_coordinate_triples_reject_missing_or_invalid_system():
+    peaks = pd.DataFrame({"peak_id": ["chr1:100-200"], "chrom": ["chr1"], "start": [100], "end": [200]})
+    mapping = io.StringIO("chrom,start,end,gene\nchr1,100,200,G1\n")
+    with pytest.raises(brim_atac.CoordinateSystemError, match="require coordinate_system"):
+        brim_atac.read_peak_gene_mapping(mapping, ",", peaks)
+    with pytest.raises(brim_atac.CoordinateSystemError, match="require coordinate_system"):
+        brim_atac.read_peak_gene_mapping(mapping, ",", peaks, "unknown")

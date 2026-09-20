@@ -14,6 +14,9 @@ DAR tableを単独解析できます。検証サマリー、明示的なannotati
 user-provided peak--gene mapping、unmapped peak表、DAR/annotationの記述的可視化を提供します。
 RNA--ATAC統合はまだ実装していません。
 
+user-provided mappingは、標準化済みDARの`peak_id`、または`chrom`/`start`/`end`列を受け付けます。
+座標列を使う場合は0-based half-openか1-based closedを明示選択し、必要な変換はprovenanceに記録されます。
+
 ## 必要環境
 
 - Python 3.11 または 3.12

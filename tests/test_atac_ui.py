@@ -118,6 +118,10 @@ def test_atac_only_export_uses_shared_manifest_and_conditional_artifacts():
         "atac_validation_report": {"source_mode": "dar_table", "coordinate_system": "0-based",
                                     "column_map": {}, "transforms": [],
                                     "thresholds": {"padj": 0.05, "log2FoldChange": 1.0}},
+        "atac_applied_user_mapping": {"file_name": "links.tsv", "sha256": "d" * 64,
+                                       "coordinate_system": "1-based",
+                                       "transform_log": [{"name": "one_based_closed_to_zero_based_half_open"}],
+                                       "matched_peaks": 1, "mapping_edges": 1},
         "atac_peak_gene_edges": pd.DataFrame({"peak_id": ["chr1:100-200"], "mapping_method": ["promoter"]}),
         "atac_unmapped_peaks": pd.DataFrame({"peak_id": ["chr1:300-400"]}),
     }
@@ -135,6 +139,7 @@ def test_atac_only_export_uses_shared_manifest_and_conditional_artifacts():
     assert manifest["inputs"]["rna"] is None
     assert manifest["inputs"]["atac"]["source_file"]["sha256"] == "a" * 64
     assert manifest["settings"]["atac"]["normalization"] is None
+    assert manifest["settings"]["atac"]["user_provided_mapping"]["coordinate_system"] == "1-based"
 
 
 def test_count_matrix_export_keeps_input_and_reference_artifacts():

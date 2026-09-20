@@ -11,20 +11,21 @@
 
 - **Current phase:** Phase 2 — ATAC UI
 - **Status:** Phase 2進行中。監査是正（ATAC-only export/provenance、入力内容hashによる
-  無効化、設計書§6・§11のATAC UI残件）を実装し、ローカル回帰テストで検証済み。
+  無効化、設計書§6・§11のATAC UI残件、user mapping座標系の明示・変換記録）を実装し、
+  ローカル回帰テストで検証済み。
 - **Last implementation commit:** Phase 2監査是正（ATAC-only export/provenance、入力hash、
   ATAC UI残件）。正確なcommit hashはGit履歴の最新実装commitを参照する。
-- **Last verified CI:** GitHub Actions run `35455355151`、`235bd31`、Ubuntu/Windows ×
+- **Last verified CI:** GitHub Actions run `35479363917`、`4f68a82`、Ubuntu/Windows ×
   Python 3.11/3.12の4環境すべて成功。
 - **Completed remediation:** 1-based closedの単一塩基peak変換、座標transform logの
   `read_dar_table()`および`run_dar()`への伝播、promoter境界・複数peak→同一gene・
   3正規化方式の回帰テスト、設計書§13の`.tsv.gz`表記への修正、STRINGの空・不正PNGを
   失敗として記録する応答判定、Meta/TF/Interactionの結果あり回帰検証、Interaction
   Analysisの`padj_is_na`/`lfc_is_na`保持、ATAC入力原本SHA-256、ATAC-onlyの共有
-  manifest/ZIP、user-provided peak--gene mapping、validation summary、unmapped peak表、
+  manifest/ZIP、user-provided peak--gene mappingの明示座標系・transform log、validation summary、unmapped peak表、
   設計書§11.1のATAC-only可視化と全図caption。
 - **Verification:** 監査是正のATAC UI/provenance/user mapping回帰テストがローカルで
-  成功。既存のGitHub Actions run `35455355151`は4環境すべて成功。今回commitの4環境CIは
+  成功。GitHub Actions run `35479363917`は4環境すべて成功。今回commitの4環境CIは
   push後に確認する。
 - **Next task:** 今回commitの4環境CIが成功した後、監査役A・Bの独立GOを得るまでPhase 3には
   着手しない。

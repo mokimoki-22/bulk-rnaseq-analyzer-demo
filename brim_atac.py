@@ -554,8 +554,13 @@ EDGE_COLUMNS = [
 
 
 def read_peak_gene_mapping(file_obj: BinaryIO | TextIO | bytes | str, sep: str,
-                           peaks: pd.DataFrame) -> pd.DataFrame:
-    """Read user-supplied peak--gene links and preserve their original evidence."""
+                           peaks: pd.DataFrame, coordinate_system: str | None = None) -> pd.DataFrame:
+    """Read user-supplied links with explicit coordinate conversion when needed.
+
+    Coordinate triples require a declared source coordinate system. ``peak_id``
+    inputs are matched to the already-standardized DAR peak IDs and therefore
+    do not accept an independent coordinate-system declaration.
+    """
     raw = _read_frame(file_obj, sep)
     normalized = {str(column).strip().lower(): column for column in raw.columns}
     gene_column = next((normalized[name] for name in ("gene", "gene_id", "gene_symbol")
@@ -567,11 +572,31 @@ def read_peak_gene_mapping(file_obj: BinaryIO | TextIO | bytes | str, sep: str,
         coordinate_columns = [normalized.get(name) for name in ("chrom", "start", "end")]
         if any(column is None for column in coordinate_columns):
             raise ATACError("User mapping requires peak_id or chrom, start, and end columns.")
+        if coordinate_system not in {"0-based", "1-based"}:
+            raise CoordinateSystemError(
+                "User mappings with chrom, start, and end require coordinate_system '0-based' or '1-based'."
+            )
         coordinates = raw.loc[:, coordinate_columns].copy()
         coordinates.columns = ["chrom", "start", "end"]
-        parsed = parse_peak_coordinates(coordinates)
+        parsed = parse_peak_coordinates(coordinates, coordinate_system)
+        transforms: list[dict[str, Any]] = []
+        if coordinate_system == "1-based":
+            parsed["start"] -= 1
+            parsed["peak_id"] = (
+                parsed["chrom"] + ":" + parsed["start"].astype(str) + "-" + parsed["end"].astype(str)
+            )
+            transforms.append(_transform_record(
+                "one_based_closed_to_zero_based_half_open", len(parsed), len(parsed),
+                {"source": "1-based closed", "target": "0-based half-open", "input": "user_peak_gene_mapping"},
+            ))
         raw["_peak_id"] = parsed["peak_id"].to_numpy()
         peak_column = "_peak_id"
+    else:
+        if coordinate_system is not None:
+            raise CoordinateSystemError(
+                "User mappings with peak_id use standardized DAR peak IDs; do not declare a coordinate system."
+            )
+        transforms = []
     if raw[peak_column].isna().any() or raw[peak_column].astype(str).str.strip().eq("").any():
         raise ATACError("User mapping peak identifiers must be non-empty.")
     if raw[gene_column].isna().any() or raw[gene_column].astype(str).str.strip().eq("").any():
@@ -586,8 +611,7 @@ def read_peak_gene_mapping(file_obj: BinaryIO | TextIO | bytes | str, sep: str,
     score_column = normalized.get("score")
     source_column = normalized.get("source")
     rows = []
-    for item in raw.itertuples(index=False):
-        values = item._asdict()
+    for _, values in raw.iterrows():
         peak = peak_rows.loc[str(values[peak_column])]
         gene = str(values[gene_column])
         evidence = "custom" if evidence_column is None else str(values[evidence_column])
@@ -602,7 +626,10 @@ def read_peak_gene_mapping(file_obj: BinaryIO | TextIO | bytes | str, sep: str,
             "user_mapping_score": None if score_column is None else values[score_column],
             "user_mapping_source": None if source_column is None else values[source_column],
         })
-    return pd.DataFrame(rows, columns=EDGE_COLUMNS)
+    result = pd.DataFrame(rows, columns=EDGE_COLUMNS)
+    result.attrs["coordinate_system"] = coordinate_system
+    result.attrs["transforms"] = transforms
+    return result
 
 
 def map_peaks_to_promoters(peaks: pd.DataFrame, genes: pd.DataFrame, upstream: int,
