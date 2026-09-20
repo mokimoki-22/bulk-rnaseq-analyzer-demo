@@ -1,7 +1,7 @@
 # PLAN.md — BRIM v2.0 実装計画
 
 - 対応設計書: `docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
-- 現在Phase: **Phase 2**
+- 現在Phase: **Phase 3**
 - 最終更新: 2026-09-20
 
 ## Current development status
@@ -9,13 +9,13 @@
 この節を、PCやCodexを切り替えて作業を再開するときの唯一の現在地とする。
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
-- **Current phase:** Phase 2 — ATAC UI
-- **Status:** Phase 2完了。ATAC-only export/provenance、入力内容hashによる無効化、
-  設計書§6・§11のATAC UI残件、user mapping座標系の明示・変換記録を実装・検証し、
-  独立監査役A・BのGOを取得済み。
+- **Current phase:** Phase 3 — Integration core（Level 1）
+- **Status:** ユーザー承認によりPhase 3へ移行し、実装計画を確認中。Phase 2は完了し、
+  前Phase移行ゲートの独立監査役A・BのGOと4環境CI成功を取得済み。Phase 3実装は、
+  下記の監査上の未解決事項を設計として明文化し、両監査役がGOを更新するまで保留する。
 - **Last implementation commit:** `c747f2e` — user-provided peak--gene mappingの明示座標系、
   1-based変換、transform log/provenance記録と回帰テスト。
-- **Last verified CI:** GitHub Actions run `35479363917`、`4f68a82`、Ubuntu/Windows ×
+- **Last verified CI:** GitHub Actions run `35479948941`、`c747f2e`、Ubuntu/Windows ×
   Python 3.11/3.12の4環境すべて成功。
 - **Completed remediation:** 1-based closedの単一塩基peak変換、座標transform logの
   `read_dar_table()`および`run_dar()`への伝播、promoter境界・複数peak→同一gene・
@@ -27,9 +27,17 @@
 - **Verification:** 監査是正のATAC UI/provenance/user mapping回帰テストと既存RNA export
   回帰テストがローカルで成功。GitHub Actions run `35479948941`（`c747f2e`）は
   Ubuntu/Windows × Python 3.11/3.12の4環境すべて成功。監査役A・BはともにGO。
-- **Next task:** ユーザーが明示承認した場合のみ、Current phaseをPhase 3へ更新して
-  Phase 3の実装計画を確認する。承認前にPhase 3の実装へ着手しない。
-- **Do not start:** Phase 3以降には着手しない。Phase 2でも既存RNA-only workflowを変更しない。
+- **Phase 3 audit status:** 監査役A・BともにCONDITIONAL NO-GO（2026-09-20）。
+  実装計画は`docs/phase3_implementation_plan.md`を参照する。
+- **OPEN QUESTIONS (implementation blocker):**
+  1. RNA・ATAC双方が未検定（`padj_is_na`または`lfc_is_na`がTrue）のedgeとgene summaryを、
+     `rna_not_tested`／`atac_not_tested`のどちらへ優先分類するか、または専用classを設けるか。
+  2. 統合edge/gene summaryの公開契約に`lfc_is_na`を明示列として追加するか。
+  3. gene ID対応率をcompatibility checkで表示のみとするか、統合停止閾値を設けるか。
+- **Next task:** 上記OPEN QUESTIONSについてユーザーの設計判断を得る。決定を設計書・
+  ARCHITECTURE.md・テスト計画に反映し、監査役A・BのGO後にのみPhase 3 coreを実装する。
+- **Do not start:** Phase 3 coreの実装、Phase 4以降のUI・export・enrichment・TF/motif機能には
+  着手しない。既存RNA-only workflowを変更しない。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
