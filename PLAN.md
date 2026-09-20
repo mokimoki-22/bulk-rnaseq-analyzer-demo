@@ -79,12 +79,16 @@
 - **Phase 6 implementation status:** 実装中。計画書§5のステップ1〜8（§7の改訂反映済み）の順に進める。完了は、実装後監査で
   監査役A・Bの両GO（コード・テスト・export・provenance・CI）を得るまで宣言しない。HOMERのパーサは実際の出力に対して
   未検証（ヘッダーの綴りは記憶に基づく）で、実データでの検証はPhase 7に送る。
-- **Next task:** Phase 6 ステップ1（peak集合とBED出力、`brim_motif_import.py`と`tests/motif_support.py`）。ステップ3の後
-  （CIチェックポイント1）で4環境のCIを確認する。
+- **Phase 6 progress:** ステップ1（peak集合・BED・コマンド文・README・bundle: `brim_motif_import.py`、
+  `tests/motif_support.py`、`tests/test_motif_import.py` 18件）を実装した。既存の`export_peaks_as_bed`は無変更で、
+  既存テストは変更していない。
+- **Next task:** Phase 6 ステップ2（結果の読込み: HOMER・汎用CSV/TSV、検証）。ステップ3の後（CIチェックポイント1）で
+  4環境のCIを確認する。
 - **Do not start:** Phase 7（検証と公開）。計画書§1で範囲外としたもの（複数ツールの併存、TF別名・family辞書、motifの
   `n_axes_supported`への算入、de novo結果の取込み、HOMER以外の専用パーサ、サンプルのmotif結果ファイル）。不変条件I-1〜I-6の
   変更、新規のネットワーク通信・依存関係・外部プロセスの実行、RNA-only workflowの変更（I-6.1）、Level 2の契約
   （`tf_candidates.csv`、`tf_level2`、`n_axes_*`）の変更、計画書D14の2つのアサーション以外の既存テストの変更・削除。
+
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
 ただし、GitHub ActionsのUbuntu/Windows × Python 3.11/3.12の4環境すべてで
