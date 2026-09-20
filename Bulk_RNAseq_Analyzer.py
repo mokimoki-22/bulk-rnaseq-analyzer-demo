@@ -1150,9 +1150,15 @@ def collect_all_results():
             + "\n"
         )
         enrichment = st.session_state.get("integration_enrichment") or {}
-        ora_history = []
+        ora_history = list((integration_provenance or {}).get("ora_history", []))
+        if not ora_history:
+            # Compatibility for an in-memory session created before the history contract.
+            ora_history = [
+                {"integration_class": integration_class, **record}
+                for integration_class, ora_result in enrichment.items()
+                for record in ora_result.get("history", [])
+            ]
         for integration_class, ora_result in enrichment.items():
-            ora_history.extend(ora_result.get("history", []))
             for library_type, library_result in ora_result.get("libraries", {}).items():
                 result_frame = library_result.get("results")
                 if isinstance(result_frame, pd.DataFrame):
@@ -1985,6 +1991,19 @@ def _integration_plot_data(genes, edges):
     ].copy()
 
 
+def _integration_plot_exclusions(genes):
+    """Return the complete, saved exclusion accounting for the quadrant."""
+    unmapped_peaks = st.session_state.get("atac_unmapped_peaks")
+    return {
+        "both_not_tested": int((genes["integration_class"] == "both_not_tested").sum()),
+        "rna_not_tested": int((genes["integration_class"] == "rna_not_tested").sum()),
+        "atac_not_tested": int((genes["integration_class"] == "atac_not_tested").sum()),
+        "mixed_accessibility": int((genes["integration_class"] == "mixed_accessibility").sum()),
+        "rna_only_no_mapped_peak": int((genes["integration_class"] == "rna_only_no_mapped_peak").sum()),
+        "missing_atac_coordinates": 0 if unmapped_peaks is None else len(unmapped_peaks),
+    }
+
+
 def _render_integration_ui(lang):
     """Render only approved Phase 4 Level 1 integration controls and results."""
     st.header(ui("RNA–ATAC integration (Level 1)", lang, "RNA–ATAC統合解析（レベル1）"))
@@ -2038,6 +2057,12 @@ def _render_integration_ui(lang):
                 "species": metadata["rna"]["species"], "genome_build": metadata["atac"]["genome_build"],
             }
             summary = brim_multiomics.build_integration_summary(classified, genes, settings)
+            plotted = _integration_plot_data(genes, classified)
+            plot_exclusions = _integration_plot_exclusions(genes)
+            summary["quadrant"] = {
+                "unit": "gene_summary", "total_genes": int(len(genes)),
+                "plotted_genes": int(len(plotted)), "exclusions": plot_exclusions,
+            }
             st.session_state["integration_edge_results"] = classified
             st.session_state["integration_gene_results"] = genes
             st.session_state["integration_settings"] = settings
@@ -2047,7 +2072,7 @@ def _render_integration_ui(lang):
                     "counts": dict(compatibility.counts), "rates": dict(compatibility.rates),
                     "warnings": list(compatibility.warnings), "errors": list(compatibility.errors),
                 },
-                **settings, "ora_history": [],
+                **settings, "quadrant": summary["quadrant"], "ora_history": [],
             }
             log_analysis("Level 1 RNA–ATAC integration", "Classified preserved peak–gene edges and gene summaries.")
             st.success(ui("Level 1 integration completed.", lang, "レベル1統合が完了しました。"))
@@ -2062,15 +2087,9 @@ def _render_integration_ui(lang):
     class_counts = genes["integration_class"].value_counts().rename_axis("class").reset_index(name="genes")
     st.dataframe(class_counts, use_container_width=True)
     plot_data = _integration_plot_data(genes, edges)
-    unmapped_peaks = st.session_state.get("atac_unmapped_peaks")
-    exclusion_counts = {
-        "both_not_tested": int((genes["integration_class"] == "both_not_tested").sum()),
-        "rna_not_tested": int((genes["integration_class"] == "rna_not_tested").sum()),
-        "atac_not_tested": int((genes["integration_class"] == "atac_not_tested").sum()),
-        "mixed_accessibility": int((genes["integration_class"] == "mixed_accessibility").sum()),
-        "rna_only_no_mapped_peak": int((genes["integration_class"] == "rna_only_no_mapped_peak").sum()),
-        "missing_atac_coordinates": 0 if unmapped_peaks is None else len(unmapped_peaks),
-    }
+    exclusion_counts = (st.session_state.get("integration_provenance") or {}).get(
+        "quadrant", {}
+    ).get("exclusions", _integration_plot_exclusions(genes))
     if not plot_data.empty:
         figure = px.scatter(
             plot_data, x="rna_log2FoldChange", y="atac_log2FoldChange", color="integration_class",
@@ -2116,10 +2135,12 @@ def _render_integration_ui(lang):
             results[ora_class] = ora_result
             st.session_state["integration_enrichment"] = results
             provenance = dict(st.session_state.get("integration_provenance") or {})
-            provenance["ora_history"] = [
-                {"integration_class": key, **record}
-                for key, item in results.items() for record in item.get("history", [])
-            ]
+            execution = {
+                "integration_class": ora_class, "input_genes": ora_result["input_genes"],
+                "background_genes": ora_result["background_genes"], "warnings": ora_result["warnings"],
+                "libraries": ora_result["history"],
+            }
+            provenance["ora_history"] = list(provenance.get("ora_history", [])) + [execution]
             st.session_state["integration_provenance"] = provenance
             log_analysis("Local integration ORA", f"Class: {ora_class}; local species-specific libraries only.")
         except brim_multiomics.IntegrationError as error:

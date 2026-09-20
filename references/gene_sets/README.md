@@ -7,6 +7,11 @@ KEGG analysis does not depend on Enrichr/Speedrichr availability at run time.
 - `KEGG_2021_Human.gmt`: Enrichr `KEGG_2021_Human` library
 - `GO_Biological_Process_2021.gmt`: Enrichr `GO_Biological_Process_2021` library
 
+`GO_Biological_Process_2021.gmt` contains human gene symbols. In Phase 4
+integration ORA, BRIM therefore enables it for Human only. Mouse runs the
+bundled `KEGG_2019_Mouse.gmt` only; BRIM does not perform cross-species
+conversion or an online fallback.
+
 Source endpoint:
 `https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=<library>`
 

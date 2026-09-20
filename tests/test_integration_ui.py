@@ -10,6 +10,7 @@ import zipfile
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
+import brim_integration_enrichment
 from rna_support import capture_downloads
 
 
@@ -75,6 +76,12 @@ def test_level1_integration_runs_and_shared_export_contains_results():
     assert {"Integration/integration_edges.csv", "Integration/gene_summary.csv", "Integration/summary.json",
             "Integration/analysis_notebook.md", "Integration/ORA/history.json"}.issubset(names)
     assert manifest["settings"]["integration"]["rna_contrast"] == {"reference": "Control", "test": "Treatment"}
+    quadrant = manifest["settings"]["integration"]["quadrant"]
+    assert quadrant["unit"] == "gene_summary" and quadrant["plotted_genes"] == 3
+    assert set(quadrant["exclusions"]) == {
+        "both_not_tested", "rna_not_tested", "atac_not_tested", "mixed_accessibility",
+        "rna_only_no_mapped_peak", "missing_atac_coordinates",
+    }
 
 
 def test_contrast_mismatch_blocks_integration_without_log2fc_inversion():
@@ -83,3 +90,30 @@ def test_contrast_mismatch_blocks_integration_without_log2fc_inversion():
     assert not app.exception
     assert app.button(key="integration_run").disabled
     assert app.session_state["integration_edge_results"] is None
+
+
+def test_ora_export_keeps_each_same_class_execution_with_its_class_name(monkeypatch):
+    def fake_ora(summary, integration_class, species):
+        assert species == "Human"
+        return {
+            "integration_class": integration_class, "species": species, "input_genes": ["G1"],
+            "background_genes": ["G1", "G2", "G3"], "warnings": [],
+            "libraries": {"KEGG": {"status": "executed", "library": "KEGG_2021_Human",
+                                    "result_count": 1, "results": pd.DataFrame({"Term": ["pathway"]})}},
+            "history": [{"library_type": "KEGG", "status": "executed", "library": "KEGG_2021_Human", "result_count": 1}],
+            "independent_test_notice": "ORA adjusted p-values are new, independent tests and are not combined with RNA or ATAC adjusted p-values.",
+        }
+
+    monkeypatch.setattr(brim_integration_enrichment, "run_class_ora", fake_ora)
+    app = _app()
+    app.run()
+    app.button(key="integration_run").click().run()
+    app.button(key="integration_run_ora").click().run()
+    app.button(key="integration_run_ora").click().run()
+    history = app.session_state["integration_provenance"]["ora_history"]
+    assert len(history) == 2 and all(item["integration_class"] == "concordant_activation" for item in history)
+    with capture_downloads() as downloads:
+        app.run()
+    with zipfile.ZipFile(io.BytesIO(downloads["results.zip"])) as archive:
+        export_history = json.loads(archive.read("Integration/ORA/history.json"))
+    assert len(export_history) == 2 and all(item["integration_class"] == "concordant_activation" for item in export_history)
