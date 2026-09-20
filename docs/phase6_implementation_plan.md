@@ -1,6 +1,6 @@
 # Phase 6 motif取り込み（Level 3）実装計画
 
-- 状態: **計画（実装NO-GO）**。実装は、A・Bが本書にGOを出し、監査役CがPLAN.mdに着手を記録した後に始める。
+- 状態: **実装中**（2026-09-21着手）。監査役A・Bが§7を含む本書にGOを発行し、監査役Cが着手を決定した。PLAN.mdに記録済み。
 - 決定者: 監査役C（AGENTS.md「Planning decision authority」、ユーザー常設委任 2026-09-20）
 - 前提: Phase 5完了（`9f4142d`、A・B実装後監査GO）。Phase 5→6移行監査で、A・Bとも計画のみGO、実装はNO-GO。`cd0a2a4`は`9f4142d`にPLAN.md・phase5計画書を足しただけの文書commit（コード差分なし）。
 - 不変条件I-1〜I-6は全て維持する。新規のネットワーク通信・依存関係・外部バイナリ呼び出しは追加しない。motif scanは実装しない（I-5.1）。BRIMは外部ツールを実行せず、BED出力、コマンド提示、結果のimportだけを行う。
@@ -21,7 +21,7 @@
 - 新規ネットワーク通信、新規依存、RNA-only workflowの変更（I-6.1）。
 - サンプル用のmotif結果ファイルの同梱（実際のツール出力と誤認されるため）。
 
-## 2. 監査役Cの決定
+## 2. 監査役Cの決定（計画レビュー後の§7が、ここの記述に優先する）
 
 ### D1 対応ツール・形式・列の対応（A1、B Q2）
 - 第一級対応は HOMER の `knownResults.txt`（`tool="homer_known"`）。それ以外は汎用CSV/TSV（`tool="generic"`）で、列対応を画面で確認する（設計書§7.3のalias提案と同じ形式）。de novo結果は取り込まない。
@@ -372,3 +372,88 @@ LIMITATIONS_EN / _JA, BACKGROUND_DEFINITION / _JA, SYMBOL_RULE_TEXT / _JA, STATU
 - 範囲外として後続Phaseに送ったもの: 複数ツールの併存、TF別名・family辞書、motifを`n_axes_supported`へ算入すること、de novo結果、HOMER以外の専用パーサ。
 
 参照した既存の事実（決定の根拠）: `brim_atac.export_peaks_as_bed`の`"all"`は検定されなかったpeakも出し、`tests/test_atac.py:528`がそれを固定している。`_current_tf_level2_runs`と`invalidate_tf_level2_results`、`reset_tf_integration_results`は`Bulk_RNAseq_Analyzer.py`の317〜340行と2056行付近にある。`tests/test_tf_integration_ui.py`の244・251・393行がLevel 3の不在を確認している。genome buildはhg38とmm10だけが選べる（1677行）。
+
+## 7. 計画レビュー後の監査役C決定（2026-09-21）— 本節が旧記述に優先する
+
+監査役A（条件付きGO、E1〜E6）とB（条件付きNO-GO、6点）の指摘を、監査役Cが次のとおり決定した。AとBはともに、D14
+（既存アサーション2件の置換）を「有効なテストの弱体化」に当たらないと明示的に判断した（実装前にユーザーの判断を
+仰ぐ必要はない）。不変条件には触れていない。
+
+### 7.1 D3追記: 染色体名の表記（A-E5）
+- `counts`に`chrom_style`（`{"chr_prefixed": n, "bare": n}`）を記録する。`chr`で始まる染色体名と、始まらない染色体名が
+  両方あれば警告を出す（「染色体名の表記が混在しています。外部ツールのgenomeと表記が合うか確認してください」）。
+  染色体名の変換はしない（I-2.2）。`chrom_style`は`peakset_fingerprint`に含める。
+- 受入テスト: 表記混在で警告が出て件数が記録される。変換されない。
+
+### 7.2 D4置換・追記: genome build、閾値の出所、README（A-minor）
+- genome名は`integration_settings["genome_build"]`から取る。これはATACのアノテーション/マッピングのbuildで、speciesに応じて
+  事前選択された値（hg38/mm10）を利用者が確認したものであり、「Level 1で明示選択した」とは書かない。推測しない。
+- Level 3のpeak集合の閾値は、`integration_settings["thresholds"]`の`atac_padj`・`atac_lfc`（Level 1の値）を使う。ATAC検証
+  レポートに閾値が無く既定の0.05/1.0が使われた場合も同じで、その旨を`motif_analysis_README.txt`に書く。
+- `motif_analysis_README.txt`の必須文言: 「`tf_candidates.csv`は設計上`motif_status=not_run`のままです。motif列付きの
+  ビューは`tf_candidates_with_motif.csv`です。」
+
+### 7.3 D5置換: 古さの規則を1つにする（A-E3、A-E4、A-E1）
+- 現在のLevel 2結果が無い、または`peakset_fingerprint`が現在値と一致しないmotif結果は、**どこでも不在として扱う**。
+  - render: Level 2と同じく消去する（`reset_motif_results()`を呼び、通知を出す）。
+  - export: 状態を変更せず、出力に含めない。
+  - import: 状態を変更せず、拒否する（次のrenderで消去される）。
+  - Level 3のrenderとexportは、それぞれ自分で`_current_tf_level2_runs`を呼ぶ。`invalidate_tf_level2_results`が
+    Level 2のrenderでしか動かないことに依存しない。
+- genome確認の文言は「peak座標と外部ツールのgenomeが同じbuild（`{build}`）である」とする。
+- `peakset_fingerprint`の再計算は、fingerprint入力の要約をキーにsession内でキャッシュしてよい（任意）。
+- 閾値の不一致、または既定以外の背景の場合、該当peak集合のmotif列の見出しにバッジ（「閾値不一致」「別の背景」）を表示する。
+
+### 7.4 D8追記: 結合のキー、ヘテロダイマー表示、記録列（B-4、A-E6、A-E1）
+- Level 2表との結合のキーは`fold_symbol(tf_symbol)`（strip + casefold）とする。綴りの一致には依存しない。
+- `motif_{p}_motif_name`は代表motifの全名（例: `Oct4:Sox17(POU,Homeobox/HMG)/…`）を出す。`motif_{p}_match_status`
+  （`matched` / `partially_matched`）と`motif_{p}_form`（`single` / `heterodimer`）を加え、画面に表示する。
+- `motif_{p}_threshold_matches_current`と`motif_{p}_background_differs_from_brim`を、`tf_candidates_with_motif.csv`と
+  `motif_results.csv`にも列として持つ（manifestだけにしない）。
+- 受入テスト: ヘテロダイマー・部分照合が画面の列に出る。綴りが違っても`fold_symbol`で結合される。
+
+### 7.5 D11置換: 無効化はインラインで行う（B-1、A-E3）
+- `invalidate_tf_level2_results()`は、`integration_tf_results = None`に加えて、`integration_motif_source`と
+  `integration_motif_results`を`None`にし、`integration_provenance`から`tf_level2`と`tf_level3`を**関数内で直接**除く。
+  `reset_motif_results()`は呼ばない。理由: 既存の関数ローダテストは`_RESET_FUNCTIONS`の関数だけを実行し、未定義名を参照すると
+  `NameError`になるため。`tests/test_tf_integration_ui.py`の`_RESET_FUNCTIONS`は変更しない（既存テストの変更は不要）。
+- `reset_tf_integration_results()`も、`tf_level3`の除去をインラインで行う。
+- `reset_motif_results()`は、renderの古さ検出（§7.3）専用とし、上記2関数から呼ばない。
+- D11の表の「古さ」の行は「renderで消去、exportとimportは変更しない」とする。
+
+### 7.6 D12追記: exportの古いコピー、NaN、記録列（B-3、A-E1）
+- exportは、`exported_provenance`から保存済みの`tf_level3`も除いた上で、現在のLevel 2とfingerprintが一致するときだけ、
+  現在の値から再構築して入れる。古いコピーが`analysis_notebook.md`やmanifestに漏れない。
+- `tf_level3`はNaNを含まない（欠損は`null`。JSONは`allow_nan=False`で書く）。
+- `motif_results.csv`と`tf_candidates_with_motif.csv`は、`threshold_matches_current`と`background_differs_from_brim`の列を持つ。
+
+### 7.7 D13置換: 因果語の除去とガード（A-E2）
+- EN: 「Candidates are hypotheses; they do not show a functional effect of the TF on genes or on a phenotype.」
+- JA: 「候補は仮説であり、TFが遺伝子や表現型に機能的な影響を与えることを示すものではありません。」
+- ガード規則: Level 3の英日の文言（定数と画面文字列）に、次の語を含まない。EN: `regulates?`、`drives?`、`driven`、
+  `causes?`、`caused`、`causing`。JA: `制御する`、`引き起こ`、`原因`。テストは正規表現で全文を検査する。Level 2の既存定数は変更しない。
+
+### 7.8 D14置換: 既存アサーションの置換の条件、AppTestとアップロード（B-2、B-5）
+- 2つのアサーションの置換は、A・Bが明示的に承認済み（弱体化に当たらない）。条件: (1) 置換するのは
+  `tests/test_tf_integration_ui.py`の244行目と393行目の2つだけ。(2) 新しい英日の文言に「after Level 2」「Level 2の後」を含める。
+  (3) 251行目、254〜264行目、435〜447行目は無変更。(4) Level 2のキャプションを書き換えても、motifのimportが無いときは
+  `Motif enrichment: not run`の部分文字列を保つ（264行目）。(5) Level 2の前にLevel 3ブロックが描画されないことを確認する
+  アサーションを1つ追加する。
+- `file_uploader`は、インストール済みのStreamlit 1.50.0のAppTestで扱えない（確定事実。requirementsは1.39以上を許す）。
+  設計は、薄いアップロードハンドラ + 純粋な`read_motif_results(bytes, …)`・`import_motif_result`の単体テスト + session stateの注入
+  である。この事実は停止条件ではない（§5の該当条件は削除）。
+- AppTestは3件以内。`build_motif_export_files`のテストは、モジュール単体（BEDのみ、古いものの除外、sha256）で行う。exportの
+  ビルド関数はアプリのスクリプト内にあり、importできない。wiringは、`capture_downloads`を使うAppTest 1件と、session stateを
+  変更して2回目の`app.run()`を行う古い結果のケースで確認する（合計3件）。AppTestは`tests/test_tf_integration_ui.py`の
+  `_level1_snapshot`と`_tf_app`をimportして再利用し、遅い実際のLevel 1実行を複製しない。
+
+### 7.9 §5への追記（B-2、B-6）
+- ステップ8に**手動確認**を加える: 実行中のアプリで、実際のアップロード経路を確認する（合成ファイルをimportする）。結果を
+  証拠として記録し、CIではない手動確認と明記する。
+- ステップ7に、`ARCHITECTURE.md`の64行目付近、177〜187行目、254〜256行目の修正を加える（`read_motif_results`・
+  `normalize_tf_symbols`・`attach_motif_enrichment`を`brim_tf_integration.py`の古い署名で書いている箇所を、
+  `brim_motif_import.py`と本書の署名に直す）。
+- HOMERのパーサは、実際の出力に対して**未検証**である（ヘッダーの綴りは記憶に基づく）。READMEとCHANGELOGにその旨を書く。
+- §3の`Bulk_RNAseq_Analyzer.py`の項: `invalidate_tf_level2_results`と`reset_tf_integration_results`にmotif消去と`tf_level3`
+  除去をインラインで追加する。`reset_motif_results()`はrenderの古さ検出専用。Level 3のrenderとexportはそれぞれ
+  `_current_tf_level2_runs`を呼ぶ。

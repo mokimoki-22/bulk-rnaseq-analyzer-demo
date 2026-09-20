@@ -1,7 +1,7 @@
 # PLAN.md — BRIM v2.0 実装計画
 
 - 対応設計書: `docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
-- 現在Phase: **Phase 5 完了、Phase 6は計画レビュー中（実装未着手）**
+- 現在Phase: **Phase 5 完了、Phase 6 実装中**
 - 最終更新: 2026-09-21
 
 ## Current development status
@@ -9,7 +9,7 @@
 この節を、PCやCodexを切り替えて作業を再開するときの唯一の現在地とする。
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
-- **Current phase:** Phase 5 完了（2026-09-21）。次はPhase 6（motifインポート、Level 3）で、下記のgateが未通過のため未着手
+- **Current phase:** Phase 5 完了（2026-09-21）。Phase 6（motifインポート、Level 3）は、計画書にA・BがGOを発行し監査役Cが着手を決定した（2026-09-21）ため、実装中
 - **Status:** Phase 4完了（2026-09-20）。commit `d2674ec`のGitHub Actions（run `35507389636`、
   Ubuntu/Windows × Python 3.11/3.12の4環境）は成功。監査役A・Bの指摘（ORA背景遺伝子の
   定義・件数の表示、`mixed_accessibility`の方向非依存ラベル、README/CHANGELOG/PLANの整合、
@@ -70,15 +70,21 @@
   （Aは論点20件、Bは質問8件と、別ブロック`tf_level3`・AppTest少数化・合成HOMER風fixtureの推奨を提示）。
   監査役Cが全論点を決定し、`docs/phase6_implementation_plan.md`に記録した。Cが決定せず残したもの: AGENTS.md
   不変条件本文の編集（ユーザー）、実際のHOMER出力・公式仕様との突合（Phase 7）、`dabbb32`のWindows 3.12失敗の原因特定。
-- **Phase 6 gate（未通過）:** 監査役A・Bが`docs/phase6_implementation_plan.md`にGOを発行し、監査役Cが着手を決定して
-  この節に記録するまで、Phase 6の実装に着手しない。計画書D14の2つの既存アサーション置換
-  （`tests/test_tf_integration_ui.py`のLevel 3不在の確認）が「有効なテストの弱体化」に当たらないことを、A・Bが
-  計画レビューで明示的に確認する（異議が出たらユーザーの判断を仰ぐ）。`cd0a2a4`（文書のみ）のCIは実行中で未確認。
-- **Next task:** `docs/phase6_implementation_plan.md`に対する監査役A・Bの計画レビュー。両者GOの後に、監査役Cが
-  着手を決定してこの節へ記録する。
-- **Do not start:** Phase 6の実装（motif/Level 3の操作・BED出力・インポート）。上記gateが記録されるまで着手しない。
-  不変条件I-1〜I-6の変更・放棄、新規ネットワーク通信・依存関係、RNA-only workflowの変更（I-6.1）、
-  既存テストの変更・削除。
+- **Phase 6 gate（通過、2026-09-21）:** 監査役A・Bが`docs/phase6_implementation_plan.md`（計画レビュー後の§7を含む）にGOを
+  発行し、監査役Cが着手を決定した。両監査役は、D14（`tests/test_tf_integration_ui.py`のLevel 3不在を確認していた2つの
+  アサーションの置換）が「有効なテストの弱体化」に当たらないことを明示的に確認した（Level 3が実装されると事実でなくなるため）。
+  CIの事実: run `35522031618`（`9f4142d`）は4ジョブすべて成功。`cd0a2a4`以降の文書のみのcommitのCIは実行中で、結果は
+  確認でき次第ここへ追記する（文書以外が原因の失敗なら、ステップ1の前にCへ差し戻す）。`dabbb32`のWindows/3.12の失敗は
+  原因不明の残余リスクのまま（緩和策: AppTestは3件以内、CIチェックポイントでWindows/3.12を再実行して記録する）。
+- **Phase 6 implementation status:** 実装中。計画書§5のステップ1〜8（§7の改訂反映済み）の順に進める。完了は、実装後監査で
+  監査役A・Bの両GO（コード・テスト・export・provenance・CI）を得るまで宣言しない。HOMERのパーサは実際の出力に対して
+  未検証（ヘッダーの綴りは記憶に基づく）で、実データでの検証はPhase 7に送る。
+- **Next task:** Phase 6 ステップ1（peak集合とBED出力、`brim_motif_import.py`と`tests/motif_support.py`）。ステップ3の後
+  （CIチェックポイント1）で4環境のCIを確認する。
+- **Do not start:** Phase 7（検証と公開）。計画書§1で範囲外としたもの（複数ツールの併存、TF別名・family辞書、motifの
+  `n_axes_supported`への算入、de novo結果の取込み、HOMER以外の専用パーサ、サンプルのmotif結果ファイル）。不変条件I-1〜I-6の
+  変更、新規のネットワーク通信・依存関係・外部プロセスの実行、RNA-only workflowの変更（I-6.1）、Level 2の契約
+  （`tf_candidates.csv`、`tf_level2`、`n_axes_*`）の変更、計画書D14の2つのアサーション以外の既存テストの変更・削除。
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
 ただし、GitHub ActionsのUbuntu/Windows × Python 3.11/3.12の4環境すべてで
