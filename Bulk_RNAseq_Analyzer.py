@@ -250,6 +250,11 @@ _ATAC_STATE_DEFAULTS = {
     "atac_results": None,
     "atac_qc_summary": None,
     "atac_uploaded_file_signature": None,
+    "atac_input_provenance": None,
+    "atac_user_mapping_signature": None,
+    "atac_user_mapping_provenance": None,
+    "atac_applied_user_mapping": None,
+    "atac_reference_metadata": None,
     "integration_edge_results": None,
     "integration_gene_results": None,
     "integration_settings": None,
@@ -318,7 +323,8 @@ def reset_integration_results():
 
 def reset_peak_mapping_results():
     """Clear mapping outputs and all downstream integration outputs."""
-    for key in ("atac_peak_gene_edges", "atac_unmapped_peaks", "atac_qc_summary"):
+    for key in ("atac_peak_gene_edges", "atac_unmapped_peaks", "atac_qc_summary",
+                "atac_applied_user_mapping", "atac_reference_metadata"):
         st.session_state[key] = None
     reset_integration_results()
 
@@ -334,7 +340,8 @@ def reset_atac_results():
 def reset_atac_input():
     """Clear ATAC input and every result that depends on it."""
     for key in ("atac_counts_df", "atac_metadata", "atac_input_df", "atac_contrast",
-                "atac_uploaded_file_signature"):
+                "atac_uploaded_file_signature", "atac_input_provenance",
+                "atac_user_mapping_signature", "atac_user_mapping_provenance"):
         st.session_state[key] = None
     reset_atac_results()
 
@@ -1014,6 +1021,15 @@ def plot_gsea_dot_plotly(df, title, template='plotly_white', font="sans-serif", 
 def collect_all_results():
     """Collect existing result files plus one shared provenance document."""
     files = {}
+    inputs = {"rna": None, "atac": None}
+    settings = {
+        "app_version": APP_VERSION,
+        "species": st.session_state.get("sp", {}).get("org", "unknown"),
+        "genome_build": None,
+        "rna": None,
+        "atac": None,
+    }
+    counts = {"rna": None, "atac": None}
     if st.session_state["counts_df"] is not None:
         files["0.1_Raw_Counts.csv"] = st.session_state["counts_df"].to_csv()
     if st.session_state.get("qc_filtered_df") is not None:
@@ -1041,33 +1057,79 @@ def collect_all_results():
             len(st.session_state["qc_filtered_df"])
             if st.session_state.get("qc_filtered_df") is not None else None
         )
+        inputs["rna"] = {"source_mode": "count_matrix", "count_matrix": matrix,
+                         "source_files": st.session_state["rna_input_files"],
+                         "is_sample_data": st.session_state.get("is_sample_data", False)}
+        settings["rna"] = {
+            "lfc_threshold": st.session_state.get("lfc_t", 1.0),
+            "padj_threshold": st.session_state.get("padj_t", 0.05),
+            "normalization": st.session_state.get("norm_method", "log1p"),
+            "low_count_filtering": {
+                "enabled": st.session_state.get("filter_enable", False),
+                "min_count": st.session_state.get("filter_min_count", 10),
+                "min_samples": st.session_state.get("filter_min_samples", 2),
+            },
+            "contrast": st.session_state.get("last_contrast", ""),
+            "analysis_log": st.session_state.get("analysis_log", []),
+            "gene_id_mapping": st.session_state["rna_id_mapping"],
+            "log2fc_inverted": False,
+        }
+        counts["rna"] = rna_counts
+    atac_results = st.session_state.get("atac_results")
+    if atac_results is not None:
+        report = st.session_state.get("atac_validation_report") or {}
+        source, atac_counts = brim_provenance.describe_atac_data(
+            st.session_state.get("atac_input_provenance") or {
+                "file_name": None, "byte_size": None, "sha256": None,
+                "source_mode": report.get("source_mode"),
+            },
+            atac_results, st.session_state.get("atac_counts_df"),
+            st.session_state.get("atac_peak_gene_edges"), st.session_state.get("atac_unmapped_peaks"),
+        )
+        inputs["atac"] = {"source_mode": report.get("source_mode"), "source_file": source}
+        annotation_reference = st.session_state.get("atac_reference_metadata")
+        if inputs["rna"] is None and annotation_reference is not None:
+            settings["species"] = st.session_state.get("atac_species")
+            settings["genome_build"] = st.session_state.get("atac_genome_build")
+        settings["atac"] = {
+            "coordinate_system": report.get("coordinate_system"),
+            "column_mapping": report.get("column_map"),
+            "transform_log": report.get("transforms", []),
+            "thresholds": report.get("thresholds"),
+            "normalization": atac_results.attrs.get("normalization"),
+            "prefilter": atac_results.attrs.get("prefilter"),
+            "size_factors": atac_results.attrs.get("size_factors"),
+            "samples_by_condition": atac_results.attrs.get("samples_by_condition"),
+            "contrast": st.session_state.get("atac_contrast"),
+            "species": st.session_state.get("atac_species") if annotation_reference is not None else None,
+            "genome_build": st.session_state.get("atac_genome_build") if annotation_reference is not None else None,
+            "mapping_settings": st.session_state.get("atac_mapping_settings") if annotation_reference is not None else None,
+            "reference": annotation_reference,
+            "user_provided_mapping": st.session_state.get("atac_applied_user_mapping"),
+        }
+        counts["atac"] = atac_counts
+        files["ATAC/dar_standardized.csv"] = atac_results.to_csv(index=False)
+        if "is_significant" in atac_results:
+            files["ATAC/dar_significant.csv"] = atac_results.loc[
+                atac_results["is_significant"].astype(bool)
+            ].to_csv(index=False)
+        if report.get("source_mode") == "count_matrix" and st.session_state.get("atac_counts_df") is not None:
+            files["ATAC/peak_counts.csv"] = st.session_state["atac_counts_df"].to_csv(index=False)
+        if st.session_state.get("atac_peak_gene_edges") is not None:
+            files["ATAC/peak_gene_edges.csv"] = st.session_state["atac_peak_gene_edges"].to_csv(index=False)
+        if st.session_state.get("atac_unmapped_peaks") is not None:
+            files["ATAC/unmapped_peaks.csv"] = st.session_state["atac_unmapped_peaks"].to_csv(index=False)
+        files["ATAC/atac_validation.json"] = json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False)
+        if st.session_state.get("atac_reference_metadata") is not None:
+            files["Provenance/reference_manifest.json"] = json.dumps(
+                st.session_state["atac_reference_metadata"], indent=2, ensure_ascii=False, allow_nan=False
+            )
+    if inputs["rna"] is not None or inputs["atac"] is not None:
         events = st.session_state["external_service_events"]
         manifest = brim_provenance.build_manifest(
-            inputs={"rna": {"source_mode": "count_matrix", "count_matrix": matrix,
-                            "source_files": st.session_state["rna_input_files"],
-                            "is_sample_data": st.session_state.get("is_sample_data", False)}},
-            settings={
-                "app_version": APP_VERSION,
-                "species": st.session_state.get("sp", {}).get("org", "unknown"),
-                "genome_build": None,
-                "rna": {
-                    "lfc_threshold": st.session_state.get("lfc_t", 1.0),
-                    "padj_threshold": st.session_state.get("padj_t", 0.05),
-                    "normalization": st.session_state.get("norm_method", "log1p"),
-                    "low_count_filtering": {
-                        "enabled": st.session_state.get("filter_enable", False),
-                        "min_count": st.session_state.get("filter_min_count", 10),
-                        "min_samples": st.session_state.get("filter_min_samples", 2),
-                    },
-                    "contrast": st.session_state.get("last_contrast", ""),
-                    "analysis_log": st.session_state.get("analysis_log", []),
-                    "gene_id_mapping": st.session_state["rna_id_mapping"],
-                    "log2fc_inverted": False,
-                },
-            },
-            counts={"rna": rna_counts},
+            inputs=inputs, settings=settings, counts=counts,
             services={"external_services_used": sorted({event["service"] for event in events
-                                                       if event.get("lookup_outcome") in ("success", "partial")}),
+                                                        if event.get("lookup_outcome") in ("success", "partial")}),
                       "events": events,
                       "external_service_events": st.session_state["external_service_history"]},
         )
@@ -1406,7 +1468,82 @@ def _atac_separator(label):
 def _atac_uploaded_signature(uploaded_file, mode):
     if uploaded_file is None:
         return None
-    return mode, getattr(uploaded_file, "name", "uploaded"), getattr(uploaded_file, "size", None)
+    return (
+        mode, getattr(uploaded_file, "name", "uploaded"), getattr(uploaded_file, "size", None),
+        brim_provenance.file_checksum(uploaded_file),
+    )
+
+
+def _atac_input_record(uploaded_file, mode):
+    """Describe original ATAC bytes once per upload identity without retaining them."""
+    return {
+        "file_name": getattr(uploaded_file, "name", "uploaded"),
+        "byte_size": getattr(uploaded_file, "size", None),
+        "sha256": brim_provenance.file_checksum(uploaded_file),
+        "source_mode": mode,
+    }
+
+
+def _atac_plot_caption(results, thresholds, unit, lang):
+    """State the threshold, displayed count, and unit for an ATAC figure."""
+    if thresholds is None:
+        threshold_text = "thresholds unavailable"
+    else:
+        threshold_text = f"padj ≤ {thresholds.get('padj')} and |log2FC| ≥ {thresholds.get('log2FoldChange')}"
+    return ui(f"{threshold_text}; n={len(results)}; unit: {unit}.", lang,
+              f"{threshold_text}; n={len(results)}; 解析単位: {unit}。")
+
+
+def _render_atac_validation_summary(results, lang):
+    """Render accepted-input diagnostics required by the Phase 2 ATAC UI."""
+    st.subheader(ui("Validation summary", lang, "検証サマリー"))
+    summary = st.columns(3)
+    summary[0].metric(ui("Rows", lang, "行数"), len(results))
+    summary[1].metric(ui("Valid peaks", lang, "有効peak数"), len(results))
+    summary[2].metric(ui("Significant DAR", lang, "有意DAR数"), int(results["is_significant"].sum()))
+    chroms = ", ".join(sorted(results["chrom"].astype(str).unique()))
+    st.caption(ui(
+        f"Chromosomes: {chroms}. Accepted input has no duplicate peak IDs, missing coordinates, or invalid coordinates.",
+        lang, f"染色体: {chroms}。受理済み入力には重複peak ID、欠損座標、無効座標はありません。",
+    ))
+    st.caption(ui(f"log2FC direction: {int(results['log2FoldChange'].gt(0).sum())} positive, "
+                  f"{int(results['log2FoldChange'].lt(0).sum())} negative.", lang,
+                  f"log2FCの向き: 正 {int(results['log2FoldChange'].gt(0).sum())}、"
+                  f"負 {int(results['log2FoldChange'].lt(0).sum())}。"))
+    if results.attrs.get("samples_by_condition") is not None:
+        st.caption(ui(f"Samples by condition: {results.attrs['samples_by_condition']}", lang,
+                      f"群ごとのサンプル数: {results.attrs['samples_by_condition']}"))
+
+
+def _render_atac_descriptive_views(results, edges, lang):
+    """Render Phase 2 ATAC descriptive views without changing statistics."""
+    thresholds = (st.session_state.get("atac_validation_report") or {}).get("thresholds")
+    chromosome_counts = results.groupby(["chrom", "accessibility_direction"], dropna=False).size().reset_index(name="count")
+    st.plotly_chart(px.bar(chromosome_counts, x="chrom", y="count", color="accessibility_direction", barmode="group",
+                           title=ui("DAR counts by chromosome", lang, "染色体別DAR数")), use_container_width=True)
+    st.caption(_atac_plot_caption(results, thresholds, "DAR peak", lang))
+    direction_counts = results["accessibility_direction"].value_counts().rename_axis("direction").reset_index(name="count")
+    st.plotly_chart(px.bar(direction_counts, x="direction", y="count",
+                           title=ui("Opening and closing peaks", lang, "opening/closing peak数")), use_container_width=True)
+    st.caption(_atac_plot_caption(results, thresholds, "DAR peak", lang))
+    if edges is None or edges.empty:
+        st.info(ui("Annotate peaks to view distance, annotation method, and mapping coverage.", lang,
+                   "TSS距離、アノテーション方法、mapping coverageを表示するにはpeakをアノテーションしてください。"))
+        return
+    distances = edges.loc[edges["distance_to_tss"].notna()].copy()
+    if not distances.empty:
+        st.plotly_chart(px.histogram(distances, x="distance_to_tss", title=ui("Peak–TSS distance", lang, "peak–TSS距離")),
+                        use_container_width=True)
+        st.caption(_atac_plot_caption(distances, thresholds, "peak–gene edge", lang))
+    methods = edges["mapping_method"].value_counts().rename_axis("method").reset_index(name="count")
+    st.plotly_chart(px.bar(methods, x="method", y="count", title=ui("Annotation method", lang, "アノテーション方法")),
+                    use_container_width=True)
+    st.caption(_atac_plot_caption(edges, thresholds, "peak–gene edge", lang))
+    mapped = int(edges["peak_id"].nunique())
+    coverage = pd.DataFrame({"status": ["mapped", "unmapped"], "count": [mapped, len(results) - mapped]})
+    st.plotly_chart(px.bar(coverage, x="status", y="count", title=ui("Mapping coverage", lang, "mapping coverage")),
+                    use_container_width=True)
+    st.caption(_atac_plot_caption(results, thresholds, "DAR peak", lang))
 
 
 def _render_atac_results(lang):
@@ -1415,6 +1552,7 @@ def _render_atac_results(lang):
         return
     st.divider()
     st.subheader(ui("ATAC-seq results", lang, "ATAC-seq結果"))
+    _render_atac_validation_summary(results, lang)
     warnings = results.attrs.get("warnings", [])
     for warning in warnings:
         st.warning(warning)
@@ -1435,6 +1573,8 @@ def _render_atac_results(lang):
         labels={"log2FoldChange": "log2 fold change", "minus_log10_padj": "-log10(padj)"},
     )
     st.plotly_chart(figure, use_container_width=True)
+    st.caption(_atac_plot_caption(results, (st.session_state.get("atac_validation_report") or {}).get("thresholds"),
+                                  "DAR peak", lang))
     st.dataframe(results, use_container_width=True)
     st.download_button(
         ui("Download DAR table", lang, "DAR表をダウンロード"), results.to_csv(index=False).encode("utf-8"),
@@ -1449,6 +1589,11 @@ def _render_atac_results(lang):
             edges.to_csv(index=False).encode("utf-8"), file_name="BRIM_ATAC_peak_gene_edges.csv",
             mime="text/csv", key="atac_download_edges",
         )
+    unmapped = st.session_state.get("atac_unmapped_peaks")
+    if unmapped is not None:
+        st.subheader(ui("Unmapped peaks", lang, "未対応付けpeak"))
+        st.dataframe(unmapped, use_container_width=True)
+    _render_atac_descriptive_views(results, edges, lang)
 
 
 def _render_atac_annotation_controls(lang):
@@ -1475,15 +1620,34 @@ def _render_atac_annotation_controls(lang):
         maximum_distance = int(columns[2].number_input(ui("Nearest-TSS maximum distance (bp)", lang, "nearest TSS最大距離（bp）"),
                                                          min_value=0, value=100_000, step=10_000,
                                                          key="atac_maximum_distance", on_change=reset_peak_mapping_results))
+        user_mapping = st.file_uploader(
+            ui("Optional user-provided peak–gene mapping", lang, "任意のuser-provided peak–gene mapping"),
+            type=["csv", "tsv", "txt"], key="atac_user_mapping_file",
+        )
+        user_mapping_separator = _atac_separator(st.selectbox(
+            ui("User mapping delimiter", lang, "user mappingの区切り文字"), ["CSV", "TSV"],
+            key="atac_user_mapping_separator", on_change=reset_peak_mapping_results,
+        ))
+        user_signature = _atac_uploaded_signature(user_mapping, "peak_gene_mapping")
+        if user_signature != st.session_state.get("atac_user_mapping_signature"):
+            reset_peak_mapping_results()
+            st.session_state["atac_user_mapping_signature"] = user_signature
+            st.session_state["atac_user_mapping_provenance"] = (
+                _atac_input_record(user_mapping, "peak_gene_mapping") if user_mapping is not None else None
+            )
         if st.button(ui("Annotate peaks", lang, "peakをアノテーション"), key="atac_annotate"):
             try:
                 standardized, transform = brim_atac.standardize_chromosomes(results, build)
                 standardized.attrs = results.attrs.copy()
                 standardized.attrs["transforms"] = list(results.attrs.get("transforms", ())) + [asdict(transform)]
                 genes = brim_atac.load_gene_annotation(build)
+                user_edges = (
+                    brim_atac.read_peak_gene_mapping(user_mapping, user_mapping_separator, standardized)
+                    if user_mapping is not None else None
+                )
                 promoter_edges = brim_atac.map_peaks_to_promoters(standardized, genes, upstream, downstream)
                 nearest_edges = brim_atac.map_peaks_to_nearest_tss(standardized, genes, maximum_distance)
-                edges = brim_atac.merge_peak_gene_evidence(promoter_edges, nearest_edges)
+                edges = brim_atac.merge_peak_gene_evidence(user_edges, promoter_edges, nearest_edges)
                 mapped = set() if edges.empty else set(edges["peak_id"])
                 st.session_state["atac_results"] = standardized
                 st.session_state["atac_peak_gene_edges"] = edges
@@ -1492,6 +1656,8 @@ def _render_atac_annotation_controls(lang):
                             "downstream": downstream, "max_distance": maximum_distance}
                 st.session_state["atac_mapping_settings"] = settings
                 st.session_state["atac_qc_summary"] = brim_atac.summarize_atac_qc(standardized, edges, settings)
+                st.session_state["atac_reference_metadata"] = dict(genes.attrs["reference"])
+                st.session_state["atac_applied_user_mapping"] = st.session_state.get("atac_user_mapping_provenance")
                 st.success(ui("Peak annotation completed.", lang, "peakアノテーションが完了しました。"))
             except brim_atac.ATACError as error:
                 st.error(str(error))
@@ -1588,7 +1754,17 @@ def _render_atac_dar_run_controls(counts, metadata, reference, test, lang):
             st.session_state["atac_results"] = result
             st.session_state["atac_validated_df"] = result
             st.session_state["atac_contrast"] = {"reference": reference, "test": test}
-            st.session_state["atac_validation_report"] = {"source_mode": "count_matrix", "transforms": result.attrs.get("transforms", [])}
+            st.session_state["atac_validation_report"] = {
+                "source_mode": "count_matrix", "coordinate_system": st.session_state.get("atac_coordinate_system"),
+                "column_map": None, "transforms": result.attrs.get("transforms", []),
+                "thresholds": {"padj": padj_threshold, "log2FoldChange": lfc_threshold},
+                "summary": {
+                    "input_rows": len(counts), "valid_peaks": len(counts),
+                    "result_peaks": len(result), "chromosomes": sorted(counts["chrom"].astype(str).unique()),
+                    "duplicate_peak_ids": 0, "missing_coordinates": 0, "invalid_coordinates": 0,
+                    "sample_size_warning": bool(result.attrs.get("sample_size_warning", False)),
+                },
+            }
             reset_peak_mapping_results()
             st.success(ui("DAR completed.", lang, "DARが完了しました。"))
         except (brim_atac.ATACError, ValueError) as error:
@@ -1624,8 +1800,16 @@ def _render_atac_dar_table_controls(uploaded_file, separator, lang):
             st.session_state["atac_input_df"] = result
             st.session_state["atac_validated_df"] = result
             st.session_state["atac_results"] = result
-            st.session_state["atac_validation_report"] = {"source_mode": "dar_table", "column_map": column_map,
-                                                            "transforms": result.attrs.get("transforms", [])}
+            st.session_state["atac_validation_report"] = {
+                "source_mode": "dar_table", "coordinate_system": coordinate_system, "column_map": column_map,
+                "transforms": result.attrs.get("transforms", []),
+                "thresholds": {"padj": padj_threshold, "log2FoldChange": lfc_threshold},
+                "summary": {
+                    "input_rows": len(result), "valid_peaks": len(result), "result_peaks": len(result),
+                    "chromosomes": sorted(result["chrom"].astype(str).unique()), "duplicate_peak_ids": 0,
+                    "missing_coordinates": 0, "invalid_coordinates": 0, "sample_size_warning": False,
+                },
+            }
             reset_peak_mapping_results()
             st.success(ui("DAR table validated.", lang, "DAR表を検証しました。"))
         except brim_atac.ATACError as error:
@@ -1651,6 +1835,8 @@ def render_atac_ui(lang):
     if signature != st.session_state.get("atac_uploaded_file_signature"):
         reset_atac_input()
         st.session_state["atac_uploaded_file_signature"] = signature
+        if uploaded_file is not None:
+            st.session_state["atac_input_provenance"] = _atac_input_record(uploaded_file, mode)
     if uploaded_file is None:
         st.info(ui("Upload a peak count matrix or an analyzed DAR table to begin.", lang,
                    "開始するにはpeak count matrixまたは解析済みDAR表をアップロードしてください。"))
@@ -2484,7 +2670,9 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
 
 # TAB 2: DEG
 with tab_multiomics:
-    render_atac_ui(lang)
+    atac_tab = st.tabs([ui("ATAC-seq", lang, "ATAC-seq")])[0]
+    with atac_tab:
+        render_atac_ui(lang)
 
 
 with tab_deg:
@@ -5169,7 +5357,7 @@ with tab_meta:
 
 # TAB 6: EXPORT
 with tab_export:
-    if st.session_state["deg_results"] is not None:
+    if st.session_state["deg_results"] is not None or st.session_state.get("atac_results") is not None:
         st.subheader(ui("📦 Package Export", lang))
         export_files = collect_all_results()
         buf = io.BytesIO()
@@ -5193,9 +5381,9 @@ with tab_export:
     else:
         _is_jp = st.session_state.get("lang_display", "日本語") == "日本語"
         if _is_jp:
-            st.info("💡 **出力するデータがありません**\n\nまずは **DEG** タブで解析を実行して結果を生成してください。")
+            st.info("💡 **出力するデータがありません**\n\nまずは **DEG** または **ATAC-seq** で解析を実行して結果を生成してください。")
         else:
-            st.info(ui("💡 **No data to export**\n\nPlease run analysis in the **DEG** tab to generate results first.", lang))
+            st.info(ui("💡 **No data to export**\n\nPlease run analysis in the **DEG** or **ATAC-seq** tab to generate results first.", lang))
 
 # TAB 6: INFO
 with tab_info:

@@ -541,15 +541,68 @@ def _edge(peak: Any, gene: Any, method: str, distance: int) -> dict[str, Any]:
             "atac_log2FoldChange": _value(peak, "log2FoldChange"),
             "atac_padj": _value(peak, "padj"),
             "atac_padj_is_na": _value(peak, "padj_is_na"),
-            "atac_lfc_is_na": _value(peak, "lfc_is_na")}
+            "atac_lfc_is_na": _value(peak, "lfc_is_na"),
+            "user_mapping_score": None, "user_mapping_source": None}
 
 
 EDGE_COLUMNS = [
     "peak_id", "chrom", "start", "end", "gene_id", "gene_symbol", "mapping_method",
     "mapping_evidence_type", "distance_to_tss", "gene_strand", "reference_build",
     "reference_release", "atac_log2FoldChange", "atac_padj", "atac_padj_is_na",
-    "atac_lfc_is_na",
+    "atac_lfc_is_na", "user_mapping_score", "user_mapping_source",
 ]
+
+
+def read_peak_gene_mapping(file_obj: BinaryIO | TextIO | bytes | str, sep: str,
+                           peaks: pd.DataFrame) -> pd.DataFrame:
+    """Read user-supplied peak--gene links and preserve their original evidence."""
+    raw = _read_frame(file_obj, sep)
+    normalized = {str(column).strip().lower(): column for column in raw.columns}
+    gene_column = next((normalized[name] for name in ("gene", "gene_id", "gene_symbol")
+                        if name in normalized), None)
+    if gene_column is None:
+        raise ATACError("User mapping requires a gene, gene_id, or gene_symbol column.")
+    peak_column = next((normalized[name] for name in ("peak_id", "peak") if name in normalized), None)
+    if peak_column is None:
+        coordinate_columns = [normalized.get(name) for name in ("chrom", "start", "end")]
+        if any(column is None for column in coordinate_columns):
+            raise ATACError("User mapping requires peak_id or chrom, start, and end columns.")
+        coordinates = raw.loc[:, coordinate_columns].copy()
+        coordinates.columns = ["chrom", "start", "end"]
+        parsed = parse_peak_coordinates(coordinates)
+        raw["_peak_id"] = parsed["peak_id"].to_numpy()
+        peak_column = "_peak_id"
+    if raw[peak_column].isna().any() or raw[peak_column].astype(str).str.strip().eq("").any():
+        raise ATACError("User mapping peak identifiers must be non-empty.")
+    if raw[gene_column].isna().any() or raw[gene_column].astype(str).str.strip().eq("").any():
+        raise ATACError("User mapping genes must be non-empty.")
+    if "peak_id" not in peaks:
+        raise CoordinateSystemError("ATAC results require peak_id before user mapping.")
+    peak_rows = peaks.set_index("peak_id", drop=False)
+    unknown = sorted(set(raw[peak_column].astype(str)) - set(peak_rows.index.astype(str)))
+    if unknown:
+        raise ATACError("User mapping contains peak IDs that are absent from the validated DAR table.")
+    evidence_column = normalized.get("evidence_type")
+    score_column = normalized.get("score")
+    source_column = normalized.get("source")
+    rows = []
+    for item in raw.itertuples(index=False):
+        values = item._asdict()
+        peak = peak_rows.loc[str(values[peak_column])]
+        gene = str(values[gene_column])
+        evidence = "custom" if evidence_column is None else str(values[evidence_column])
+        rows.append({
+            "peak_id": peak["peak_id"], "chrom": peak["chrom"], "start": int(peak["start"]),
+            "end": int(peak["end"]), "gene_id": gene, "gene_symbol": gene,
+            "mapping_method": "user_provided", "mapping_evidence_type": evidence,
+            "distance_to_tss": None, "gene_strand": None, "reference_build": None,
+            "reference_release": None, "atac_log2FoldChange": peak.get("log2FoldChange"),
+            "atac_padj": peak.get("padj"), "atac_padj_is_na": peak.get("padj_is_na"),
+            "atac_lfc_is_na": peak.get("lfc_is_na"),
+            "user_mapping_score": None if score_column is None else values[score_column],
+            "user_mapping_source": None if source_column is None else values[source_column],
+        })
+    return pd.DataFrame(rows, columns=EDGE_COLUMNS)
 
 
 def map_peaks_to_promoters(peaks: pd.DataFrame, genes: pd.DataFrame, upstream: int,

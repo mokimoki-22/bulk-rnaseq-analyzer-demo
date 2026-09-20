@@ -538,3 +538,23 @@ def test_chromosome_conversion_updates_peak_id_and_records_original():
     assert converted["peak_id"].tolist() == ["chr1:10-20", "chrM:30-40"]
     assert converted["original_peak_id"].tolist() == ["1:10-20", "MT:30-40"]
     assert log.affected_rows == 2 and log.success_rate == 1.0
+
+
+def test_user_peak_gene_mapping_preserves_external_evidence_and_priority():
+    peaks = pd.DataFrame({
+        "peak_id": ["chr1:100-200"], "chrom": ["chr1"], "start": [100], "end": [200],
+        "log2FoldChange": [1.5], "padj": [0.01], "padj_is_na": [False], "lfc_is_na": [False],
+    })
+    user = brim_atac.read_peak_gene_mapping(
+        io.StringIO("peak_id,gene,evidence_type,score,source\nchr1:100-200,G1,ABC,0.91,custom-map\n"),
+        ",", peaks,
+    )
+    promoter = pd.DataFrame([{
+        "peak_id": "chr1:100-200", "gene_id": "G1", "gene_symbol": "G1", "mapping_method": "promoter",
+        "mapping_evidence_type": "promoter_overlap", "chrom": "chr1", "start": 100, "end": 200,
+    }])
+    merged = brim_atac.merge_peak_gene_evidence(user, promoter)
+    assert len(merged) == 1
+    assert merged.loc[0, "mapping_methods"] == ["user_provided", "promoter"]
+    assert merged.loc[0, "user_mapping_score"] == 0.91
+    assert merged.loc[0, "user_mapping_source"] == "custom-map"

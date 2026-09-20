@@ -125,3 +125,35 @@ particular, padded padj==1 values must not be counted as formerly missing.
         "input_genes": len(raw), "input_samples": len(raw.columns), "result_genes": len(results),
         "samples_by_condition": sample_counts, "na_counts": na_counts,
     }
+
+
+def describe_atac_data(input_record: Mapping[str, Any], results: pd.DataFrame,
+                       peak_counts: pd.DataFrame | None = None,
+                       edges: pd.DataFrame | None = None,
+                       unmapped_peaks: pd.DataFrame | None = None) -> tuple[dict, dict]:
+    """Describe explicit ATAC inputs and outputs without inferring missing settings."""
+    source = _copy_json_mapping(input_record, "ATAC input record")
+    if source.get("sha256") is not None and not isinstance(source["sha256"], str):
+        raise ValueError("ATAC source SHA-256 must be a string or null.")
+    na_counts = {}
+    for flag in ("padj_is_na", "lfc_is_na"):
+        if flag not in results:
+            na_counts[flag] = None
+        else:
+            values = results[flag]
+            if values.isna().any() or not pd.api.types.is_bool_dtype(values):
+                raise ValueError(f"ATAC {flag} must contain non-missing boolean flags.")
+            na_counts[flag] = int(values.sum())
+    mapped_peaks = None
+    if edges is not None:
+        mapped_peaks = int(edges["peak_id"].nunique()) if not edges.empty else 0
+    return source, {
+        "input_peaks": None if peak_counts is None else int(len(peak_counts)),
+        "result_peaks": int(len(results)),
+        "significant_peaks": int(results["is_significant"].astype(bool).sum())
+        if "is_significant" in results else None,
+        "na_counts": na_counts,
+        "mapping_edges": None if edges is None else int(len(edges)),
+        "mapped_peaks": mapped_peaks,
+        "unmapped_peaks": None if unmapped_peaks is None else int(len(unmapped_peaks)),
+    }

@@ -106,3 +106,21 @@ def test_provenance_has_no_streamlit_dependency_or_network_access():
         elif isinstance(node, ast.ImportFrom):
             imports.append(node.module or "")
     assert not any(name.split(".")[0] in {"streamlit", "requests", "urllib", "socket"} for name in imports)
+
+
+def test_atac_description_preserves_explicit_input_identity_and_na_counts():
+    results = pd.DataFrame({
+        "is_significant": [True, False], "padj_is_na": [False, True], "lfc_is_na": [False, False],
+    })
+    source, counts = provenance.describe_atac_data(
+        {"file_name": "atac.csv", "byte_size": 12, "sha256": provenance.file_checksum(b"atac bytes"),
+         "source_mode": "dar_table"},
+        results, edges=pd.DataFrame({"peak_id": ["p1", "p1"]}),
+        unmapped_peaks=pd.DataFrame({"peak_id": ["p2"]}),
+    )
+    assert source["sha256"] == hashlib.sha256(b"atac bytes").hexdigest()
+    assert counts == {
+        "input_peaks": None, "result_peaks": 2, "significant_peaks": 1,
+        "na_counts": {"padj_is_na": 1, "lfc_is_na": 0},
+        "mapping_edges": 2, "mapped_peaks": 1, "unmapped_peaks": 1,
+    }

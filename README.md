@@ -9,6 +9,11 @@ RNA-seqとATAC-seqの統合機能を追加しています。Phase 1ではStreaml
 ATAC core（count matrix / 解析済みDARの標準化、DAR推定、GENCODE TSSを使う
 promoter / nearest-TSS mapping）を提供します。UIはPhase 2で追加します。
 
+Phase 2では`Multi-omics`内の`ATAC-seq`サブタブで、peak count matrixまたは解析済み
+DAR tableを単独解析できます。検証サマリー、明示的なannotation設定、任意の
+user-provided peak--gene mapping、unmapped peak表、DAR/annotationの記述的可視化を提供します。
+RNA--ATAC統合はまだ実装していません。
+
 ## 必要環境
 
 - Python 3.11 または 3.12
@@ -53,7 +58,7 @@ count matrixは`chr1:100200-100700`形式または`chrom,start,end`列形式、�
 count matrixの正規化はDESeq2 median-of-ratios、total reads in peaks、user-supplied
 size factorsに対応します。事前フィルタは既定無効で、有効時の初期候補は全サンプル合計
 count 10未満の除外です。選択方式、size factor、入力・除外・解析peak数は返却DataFrameの
-`attrs`に保持され、Phase 2で共有manifestへ接続します。
+`attrs`に保持され、共有manifestへ記録されます。
 
 ## RNA結果とprovenance
 
@@ -62,7 +67,9 @@ DEG結果には`padj_is_na` / `lfc_is_na`が含まれます。これらはPyDESe
 `padj_is_na=True`を「検定済みで有意でない」と解釈しないでください。
 
 ExportのZIPには既存のCSV等に加えて`Provenance/manifest.json`と
-`Provenance/manifest.md`が含まれます。単独ダウンロードも同じ内容です。
+`Provenance/manifest.md`が含まれます。ATAC-only解析でも、標準DAR、有意DAR、条件に応じた
+count matrix・peak--gene edge・unmapped peak・validation・固定reference metadataを同じ
+shared manifest経路で出力します。単独ダウンロードも同じ内容です。
 旧`reproducibility_report.json`からの項目対応はCHANGELOGに記載しています。
 
 manifestは環境・入力・設定・件数・外部サービスを記録します。アップロード原本の

@@ -109,6 +109,7 @@ run_dar(counts_df, metadata, ref_condition, test_condition,
         size_factors=None) -> pd.DataFrame
 read_dar_table(file_obj, sep, padj_threshold, lfc_threshold,
                coordinate_system, column_map=None) -> pd.DataFrame
+read_peak_gene_mapping(file_obj, sep, peaks) -> pd.DataFrame
 validate_dar_table(df, coordinate_system, padj_threshold,
                    lfc_threshold) -> ValidationResult
 standardize_chromosomes(df, build) -> tuple[pd.DataFrame, TransformLog]
@@ -165,6 +166,8 @@ file_checksum(file_obj) -> str
 collect_environment() -> dict
 build_manifest(inputs, settings, counts, services) -> dict
 render_manifest_markdown(manifest) -> str
+describe_rna_data(raw_csv, results, metadata_frame) -> tuple[dict, dict]
+describe_atac_data(input_record, results, peak_counts, edges, unmapped_peaks) -> tuple[dict, dict]
 ```
 
 RNA用とATAC用で別々のmanifest生成経路を作らない。既存の
