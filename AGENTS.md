@@ -51,6 +51,22 @@ Auditors do not edit implementation, tests, plans, or configuration while
 auditing. Their reports are evidence for the phase-transition decision, not
 implementation instructions.
 
+## Planning decision authority
+
+When the user explicitly delegates an unresolved planning or design choice,
+appoint **Auditor C — scientific, bioinformatics, and usability decision
+authority**. Auditor C reviews the scientific implications, bioinformatics
+data contract, and usability for biologists who do not program, then makes the
+delegated decision with rationale and acceptance tests.
+
+Auditor C's decision is the authorized resolution for that delegated choice.
+It must be recorded in the relevant design and planning documents before
+implementation. Auditor C cannot waive project-specific invariants, expand the
+delegated scope, or replace the independent A/B phase-transition audit gate.
+Auditor C is read-only while deciding; implementation remains the responsibility
+of the primary agent after the decision is documented and the required A/B GO
+decisions are obtained.
+
 ## Coding
 
 - Prefer readable code over compact code.

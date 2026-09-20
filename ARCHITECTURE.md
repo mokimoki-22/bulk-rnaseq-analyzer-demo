@@ -138,6 +138,12 @@ extract_gene_set(summary, integration_class) -> list[str]
 build_integration_summary(edges, genes, settings) -> dict
 ```
 
+`standardize_rna_results()` は、宣言された `gene_id` または `gene_symbol` を結合キーとして
+保持する。symbol の大小文字変更・alias補完は行わず、Ensembl version suffixの除去だけを
+明示transform logとともに許可する。両NA flagを含む統合データ契約と、
+`CompatibilityResult` の `errors`、`warnings`、gene-ID対応件数・率は設計書§8・§10に従う。
+解析層はメタデータや閾値をsession stateから読まない。
+
 ### 3.3 `brim_tf_integration.py`（Phase 5–6）
 
 TF候補の推定と、外部motif結果の統合。

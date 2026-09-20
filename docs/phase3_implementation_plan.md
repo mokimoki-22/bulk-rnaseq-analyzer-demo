@@ -3,10 +3,10 @@
 ## Status
 
 Planning only.  The user authorized moving the current phase to Phase 3 on
-2026-09-20.  Independent Auditor A and Auditor B both issued **CONDITIONAL
-NO-GO** for implementation.  No Phase 3 code may be written until the open
-questions below are resolved in the design documents and both decisions are
-updated to GO.
+2026-09-20 and delegated the open design decisions to Auditor C.  Auditor C
+resolved them on 2026-09-20; the design and architecture documents now record
+the resulting contract.  No Phase 3 code may be written until Auditor A and
+Auditor B independently update their decisions to GO.
 
 ## Approved scope after the gate is cleared
 
@@ -37,17 +37,19 @@ Phase 3 is limited to Streamlit-free Level 1 analysis and its tests:
 No Integration subtab or other Phase 4 UI, plot, export/provenance UI,
 enrichment, TF analysis, motif analysis, new network access, or dependencies.
 
-## Implementation blockers requiring a design decision
+## Resolved decisions (Auditor C, delegated authority)
 
-1. Specify the edge and gene-summary class when RNA and ATAC are both not
-   tested.  The existing design defines `rna_not_tested` and `atac_not_tested`
-   but not their precedence or a joint class.
-2. Specify whether `lfc_is_na` is an explicit public column in the integration
-   edge and gene-summary contracts.  Both input modalities carry it; dropping
-   it would violate information preservation.
-3. Specify whether gene-ID matching rate is informative only or has a defined
-   compatibility-stop threshold.  The core will report the rate explicitly;
-   it must not invent a threshold.
+1. `both_not_tested` is an explicit edge class when both modalities are not
+   tested; `rna_not_tested` and `atac_not_tested` apply only when that modality
+   alone is not tested.  A not-tested result is `padj_is_na OR lfc_is_na`.
+   Gene aggregation follows the exact precedence in design §10.3.
+2. Both modalities' `padj_is_na` and `lfc_is_na` are public edge columns.
+   Gene summaries retain RNA flags and unique-peak counts for each ATAC NA and
+   tested state, plus sorted `source_edge_ids`.
+3. Zero shared genes blocks integration.  Any nonzero overlap is permitted;
+   the two matching rates and component counts are returned, with a strong
+   warning below 80%.  No universal numeric stop threshold is scientifically
+   defensible.
 
 ## Approval checkpoint
 

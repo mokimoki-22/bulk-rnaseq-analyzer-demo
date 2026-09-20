@@ -27,15 +27,14 @@
 - **Verification:** 監査是正のATAC UI/provenance/user mapping回帰テストと既存RNA export
   回帰テストがローカルで成功。GitHub Actions run `35479948941`（`c747f2e`）は
   Ubuntu/Windows × Python 3.11/3.12の4環境すべて成功。監査役A・BはともにGO。
-- **Phase 3 audit status:** 監査役A・BともにCONDITIONAL NO-GO（2026-09-20）。
-  実装計画は`docs/phase3_implementation_plan.md`を参照する。
-- **OPEN QUESTIONS (implementation blocker):**
-  1. RNA・ATAC双方が未検定（`padj_is_na`または`lfc_is_na`がTrue）のedgeとgene summaryを、
-     `rna_not_tested`／`atac_not_tested`のどちらへ優先分類するか、または専用classを設けるか。
-  2. 統合edge/gene summaryの公開契約に`lfc_is_na`を明示列として追加するか。
-  3. gene ID対応率をcompatibility checkで表示のみとするか、統合停止閾値を設けるか。
-- **Next task:** 上記OPEN QUESTIONSについてユーザーの設計判断を得る。決定を設計書・
-  ARCHITECTURE.md・テスト計画に反映し、監査役A・BのGO後にのみPhase 3 coreを実装する。
+- **Phase 3 planning decision:** ユーザーが委任した監査役C（科学・bioinformatics・
+  非プログラマー向け運用性の判断担当）が決定した。双方未検定は`both_not_tested`、
+  `lfc_is_na`は公開契約に保持、gene ID共有0件だけを停止し80%未満は強い警告として
+  続行する。詳細は設計書§6.3・§8・§10と`docs/phase3_implementation_plan.md`を参照する。
+- **Phase 3 audit status:** Cの判断を文書化済み。監査役A・Bの再GOを待つ。
+- **OPEN QUESTIONS:** なし。
+- **Next task:** 文書化した監査役Cの判断を監査役A・Bが再監査し、双方GOならPhase 3 coreを
+  実装する。
 - **Do not start:** Phase 3 coreの実装、Phase 4以降のUI・export・enrichment・TF/motif機能には
   着手しない。既存RNA-only workflowを変更しない。
 

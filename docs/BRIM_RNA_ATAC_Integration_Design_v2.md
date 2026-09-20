@@ -317,6 +317,16 @@ Multi-omics
    - 統合結果とprovenance
 ```
 
+Compatibility checkは構造化metadataのspecies、ATAC genome build、contrastの
+`reference` / `test` を必須とし、表示文字列を解析して推測しない。RNA count-based DEGは
+genome buildを使わないため、RNA genome buildには明示的な`not_applicable`を許可する。
+shared geneが0件なら統合を停止する。1件以上なら実行可能とし、`n_rna_unique_genes`、
+`n_atac_unique_mapped_genes`、`n_shared_genes`、`rna_gene_match_rate`、
+`atac_gene_match_rate`を返す。いずれかの対応率が80%未満なら停止せず、
+「統合は共有IDのみに基づきます。低い対応率はID種別、species、annotation release、または
+入力の不一致を示す可能性があります。結果を生物学的な欠如と解釈しないでください。」と
+強く注意する。普遍的な停止閾値は設けない。
+
 段階開示を採用する理由。
 
 - 初見のユーザーは、レベル2/3が何を与えるか事前には判断できない。レベル1の結果を見た後に選択肢を提示するほうが判断できる。
@@ -559,9 +569,11 @@ distance_to_tss
 rna_log2FoldChange
 rna_padj
 rna_padj_is_na
+rna_lfc_is_na
 atac_log2FoldChange
 atac_padj
 atac_padj_is_na
+atac_lfc_is_na
 rna_significant
 atac_significant
 integration_class
@@ -574,15 +586,23 @@ gene_symbol
 rna_log2FoldChange
 rna_padj
 rna_padj_is_na
+rna_lfc_is_na
 n_mapped_peaks
 n_opening_peaks
 n_closing_peaks
 n_significant_peaks
-accessibility_pattern     # opening / closing / mixed / no_significant_peak
+n_atac_padj_na_peaks
+n_atac_lfc_na_peaks
+n_atac_not_tested_peaks
+n_atac_tested_peaks
+accessibility_pattern     # opening / closing / mixed_accessibility / no_significant_peak
 representative_peak_id
 representative_peak_rule
+source_edge_ids           # ソート済み。元edgeへ戻る経路
 integration_class
 ```
+
+ATAC由来の件数はすべてunique `peak_id` 数であり、一対多edgeを重複計数しない。
 
 `representative_peak_rule` を必須列とし、代表peakがどの規則で選ばれたかを明示する。初期値は `smallest_atac_padj_then_largest_abs_lfc` とするが、元peak一覧を常に保持する。
 
@@ -691,11 +711,13 @@ RNAとATACは別々の閾値を使う。
 ```text
 RNA significant:
     rna_padj_is_na == False
+    and rna_lfc_is_na == False
     and rna_padj <= RNA_PADJ_THRESHOLD
     and abs(rna_log2FoldChange) >= RNA_LFC_THRESHOLD
 
 ATAC significant:
     atac_padj_is_na == False
+    and atac_lfc_is_na == False
     and atac_padj <= ATAC_PADJ_THRESHOLD
     and abs(atac_log2FoldChange) >= ATAC_LFC_THRESHOLD
 ```
@@ -712,13 +734,18 @@ ATAC significant:
 | RNA up、ATAC closing | `discordant_closed_up` | 方向が不一致 |
 | RNA非有意、ATAC有意 | `atac_only` | ATACのみ閾値を満たす |
 | RNA有意、ATAC非有意 | `rna_only_on_mapped_peak` | RNAのみ閾値を満たす |
-| **RNAが検定されていない** | **`rna_not_tested`** | **RNA側がindependent filtering等で評価されていない** |
-| **ATACが検定されていない** | **`atac_not_tested`** | **ATAC側が評価されていない** |
+| **RNA・ATAC双方が未検定** | **`both_not_tested`** | **両側に検定可能な結果がない** |
+| **RNAのみが未検定** | **`rna_not_tested`** | **RNA側がindependent filtering等で評価されていない** |
+| **ATACのみが未検定** | **`atac_not_tested`** | **ATAC側が評価されていない** |
 | 両方非有意 | `not_significant` | 統合上の有意証拠なし |
 
 peakが対応しない有意RNA遺伝子は、gene-levelで `rna_only_no_mapped_peak` とする。
 
-`rna_not_tested` および `atac_not_tested` は版2.0で新設した分類である。版1.0の規則では、これらが `atac_only` または `not_significant` に混入していた。とくに `atac_only` は「クロマチンは開いたが発現は変化しない」という解釈上注目される群であるため、統計的に評価されていない遺伝子の混入は解釈を歪める。
+未検定は`padj_is_na OR lfc_is_na`である。補完済みのpadj=1.0またはlog2FC=0.0でも、
+いずれかのflagがTrueなら未検定として扱う。edge分類の優先順は
+`both_not_tested`、`rna_not_tested`、`atac_not_tested`、有意性・方向による分類、
+`not_significant`とする。これらのclassは`atac_only`、`rna_only_on_mapped_peak`、
+`not_significant`へ混入させない。
 
 ### 10.3 Gene-level aggregation
 
@@ -726,11 +753,15 @@ peakが対応しない有意RNA遺伝子は、gene-levelで `rna_only_no_mapped_
 
 gene-level分類は以下の優先規則を使う。
 
-1. RNAが検定されていない場合は `rna_not_tested` とする。
-2. 有意peakがない場合はRNA-onlyまたはnot significant。
-3. 有意peakが一方向のみなら、その方向を採用する。
-4. openingとclosingが混在する場合はmixedとする。
-5. mixedの場合はconcordant／discordantへ単純化しない。
+1. RNA未検定かつ全mapped ATAC peakが未検定なら`both_not_tested`とする。
+2. RNA未検定かつ検定済みATAC peakが1本以上なら`rna_not_tested`とする。mapped peakが
+   ないRNA未検定geneにも、ATAC未検定を推論せず`rna_not_tested`を使う。
+3. RNA検定済みかつ全mapped ATAC peakが未検定なら`atac_not_tested`とする。
+4. 検定済みATAC peakが1本以上なら、未検定peakの件数を残しつつ、検定済みpeakだけで
+   通常の集約を行う。
+5. 有意peakがない場合はRNA-onlyまたはnot significant。
+6. openingとclosingが混在する場合は`mixed_accessibility`とする。多数決や最大効果量で
+   一方向へ潰さず、concordant／discordantへ単純化しない。
 
 ### 10.4 相関係数
 
@@ -1175,14 +1206,16 @@ ATAC／統合機能では新たな外部通信を追加しない。
 
 `test_multiomics.py`:
 
-- 全分類を検証する（`rna_not_tested` / `atac_not_tested` を含む）
-- **`padj_is_na` の遺伝子が `atac_only` へ混入しない**
+- 全分類を検証する（`both_not_tested` / `rna_not_tested` / `atac_not_tested` を含む）
+- **`padj_is_na`または`lfc_is_na`の遺伝子が `atac_only` へ混入しない**
 - contrast逆向きを拒否する
 - species不一致を拒否する
+- shared gene 0件を拒否し、低対応率だがshared geneがある場合に警告付きで続行する
+- gene ID種別の暗黙変換を拒否し、Ensembl version suffix除去をtransform logへ記録する
 - RNA-only／ATAC-onlyを保持する
-- 複数peakのmixed判定を検証する
+- 複数peakのmixed_accessibility判定と、検定済み・未検定ATAC peakの混在集約を検証する
 - threshold境界値を検証する
-- 元edgeが失われないことを検証する
+- 元edge、両NA flag、unique peak数、source edge経路が失われないことを検証する
 - 同じ入力と設定から同じ出力を得る
 
 `test_tf_integration.py`:
@@ -1477,7 +1510,8 @@ BAMを必要とせず、portable配布とGUI完結を優先した設計上の選
 - bulk dataは細胞組成変化の影響を受ける。
 - peak数に依存するgene-level biasが生じ得る。
 - RNAとATACで独立に多重検定補正されたpadjを、統合後の新しい統計的有意性として扱わない。
-- 検定されなかった遺伝子（independent filtering等）は `rna_not_tested` として分離しており、非有意とは異なる。
+- 検定されなかった遺伝子・peak（independent filtering等）は`both_not_tested`、
+  `rna_not_tested`、`atac_not_tested`として分離しており、非有意とは異なる。
 
 **転写因子候補について**
 
@@ -1522,7 +1556,7 @@ BRIM v2.0の初期統合版は、以下をすべて満たした時点で完成�
 
 - contrast不一致を検出して統合を止める。
 - RNA–ATAC全分類を正しく生成する。
-- `rna_not_tested` が `atac_only` へ混入しない。
+- `both_not_tested`、`rna_not_tested`、`atac_not_tested`がmodality-onlyまたは非有意へ混入しない。
 - mixed accessibilityを単一方向へ潰さない。
 - 陰性対照テストでスコアが低下する。
 
