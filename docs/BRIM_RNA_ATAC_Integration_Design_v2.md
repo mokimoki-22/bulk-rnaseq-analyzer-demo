@@ -1285,6 +1285,10 @@ fixture作成の要件:
 - motif結果をランダムなTFへ付け替えたとき、3軸一致TFが減少する
 
 各テストは統計的な閾値ではなく、方向性（スコアが有意に低下すること）で判定する。
+Phase 3では先頭の2件だけを実施する。固定seedの人工fixtureに事前定義したconcordant
+signalを置き、unshuffled結果と比較して`concordant_activation`+
+`concordant_repression`のedge数が減少することを判定する。これは新たな統計検定ではない。
+残るTF標的・motifの2件はそれぞれPhase 5–6で実施する。
 
 ## 18. 性能要件
 

@@ -30,7 +30,16 @@ Phase 3 is limited to Streamlit-free Level 1 analysis and its tests:
 7. Add `tests/test_multiomics.py`, including all classifications, exact
    threshold boundaries, NA handling, compatibility rejections, one-to-many
    edges, mixed accessibility, deterministic output, RNA-only genes without a
-   mapped peak, and fixed-seed negative controls required by design §17.4.
+   mapped peak, and the two fixed-seed negative controls assigned to Phase 3:
+   (a) peak--gene edge shuffling and (b) RNA condition-label shuffling.
+
+For each Phase 3 negative control, a fixed synthetic fixture must have a
+predefined concordant signal.  The test compares the unshuffled result with
+the fixed-seed shuffled result and requires the total number of concordant
+edges (`concordant_activation` + `concordant_repression`) to decrease.  This
+is a directional, reproducible check rather than a new statistical test.
+The TF-target randomization and motif-to-TF randomization controls in design
+§17.4 belong to Phases 5--6 and are not Phase 3 work.
 
 ## Explicitly out of scope
 

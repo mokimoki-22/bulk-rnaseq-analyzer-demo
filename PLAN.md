@@ -228,8 +228,12 @@ StreamlitなしでATAC annotationが完結し、期待edgeと一致する。
 
 ## Phase 2: ATAC UI
 
-**状態:** 進行中 — 監査是正を実装・ローカル検証済み。今回commitの4環境CIと再監査が残る。
+**状態:** 完了 — PASS（独立監査役A・BのGO、2026-09-20）
 **設計書参照:** §6.1–6.2, §11.1, §15
+
+**完了記録:** 最終実装commit `c747f2e` のGitHub Actions run `35479948941`で、
+Ubuntu/Windows × Python 3.11/3.12の4環境すべて成功。監査役A・BがGOを確認した後、
+Current development statusをPhase 3へ移行した。
 
 **作業**
 - `Multi-omics` タブを追加（既存7タブ→8タブ）
