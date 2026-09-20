@@ -9,7 +9,7 @@
 この節を、PCやCodexを切り替えて作業を再開するときの唯一の現在地とする。
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
 
-- **Current phase:** Phase 4 — Integration UI（Level 1）
+- **Current phase:** Phase 5 — TF候補推定（Level 2）（実装中、2026-09-20着手）
 - **Status:** Phase 4完了（2026-09-20）。commit `d2674ec`のGitHub Actions（run `35507389636`、
   Ubuntu/Windows × Python 3.11/3.12の4環境）は成功。監査役A・Bの指摘（ORA背景遺伝子の
   定義・件数の表示、`mixed_accessibility`の方向非依存ラベル、README/CHANGELOG/PLANの整合、
@@ -35,11 +35,19 @@
 - **OPEN QUESTIONS:** なし。残存事項（非ブロッカー）: 設計書のLevel 1/2/3ステージ1行表示は
   未実装（Phase 5で扱う）。DAR contrastのラベルは利用者入力のため、入力誤りはデータから
   検出できない（ラベル未指定・不一致は実行を拒否する）。
-- **Next task:** 本文書commitのGitHub Actions（4環境）を確認する。その後、Phase 4→5移行について
-  監査役A・Bの独立監査を受け、両者GOの場合に限り、監査役Cが着手可否を決定してPLAN.mdへ記録する
-  （AGENTS.mdのPlanning decision authority、2026-09-20のユーザー常設委任）。
-- **Do not start:** Phase 4→5移行のA・B両GOと監査役Cの着手決定が記録されるまで、Phase 5以降の
-  TF/motif機能には着手しない。既存RNA-only workflowを変更しない。
+- **Phase 4→5 transition audit:** 監査役Aは実装CONDITIONAL NO-GO・計画のみGO、監査役Bは
+  CONDITIONAL NO-GO（実装前にCの決定と着手記録が必要）。指摘の設計上の論点9件とBの質問3件を
+  監査役Cが決定し、`docs/phase5_implementation_plan.md`に記録した。
+- **Phase 5 gate:** 監査役A・Bが`docs/phase5_implementation_plan.md`（§5・§5.9の追記反映済み）にGOを発行し、
+  監査役Cが着手を決定した（2026-09-20）。GOの内容: D1は不変条件I-1.5の明確化であり再解釈ではない
+  （A・B確認）。Level 1再実行時にORA・TF・motifのsession結果を消去するPhase 4挙動の変更は承認済み。
+  Phase 5実装の完了は、実装後監査で監査役A・Bの両GO（コード・テスト・export/provenance・CI）を得るまで
+  宣言しない。Phase 6へは進まない。
+- **Next task:** Phase 5実装を`docs/phase5_implementation_plan.md`§7の順序で行う。現在: ステップ1
+  （`tests/tf_support.py`と`brim_tf_integration.py`の純関数群、陰性対照の早期確認）。
+- **Do not start:** Phase 6（motif/Level 3の操作・BED出力・取り込み）。計画書§1「追加しないもの」の全項目。
+  不変条件I-1〜I-6の変更・放棄、新規ネットワーク通信・依存関係、RNA-only workflowの変更（I-6.1）、
+  既存テストの変更・削除。
 
 各タスクは現在Phaseの範囲のみを実装する。将来Phaseの機能を先取りしない。
 Phaseを進めるときはこのファイルの「現在Phase」を更新する。
@@ -338,7 +346,8 @@ BRIM sample RNAとsample ATACから一連の解析・出力が完了する。
 
 ## Phase 5: TF候補推定（レベル2）
 
-**状態:** 未着手
+**状態:** 計画済み・実装未着手（監査役Cの決定を`docs/phase5_implementation_plan.md`に記録、2026-09-20）。
+監査役A・Bの計画レビューGOと監査役Cの着手決定の記録を待つ。
 **設計書参照:** §6.4, §8.5, §12.1–12.3, §14.3
 
 **作業**
@@ -352,7 +361,9 @@ BRIM sample RNAとsample ATACから一連の解析・出力が完了する。
 - unit tests（`test_tf_integration.py`）
 
 **完了条件**
-sample dataからTF候補が提示され、背景と多重検定の扱いが結果に明記される。
+文書化した合成の陽性・陰性対照ペア（`tests/tf_support.py`、固定seed。詳細は`docs/phase5_implementation_plan.md`§5.6）で、
+仕込みTFが候補として得られ、陰性対照では（この固定seedで）`padj ≤ 0.05`のTFが0個であり、背景と多重検定の扱いが結果に
+明記される。実データでの検証ではなく、生物学的な妥当性を示すものではない。
 
 **Acceptance criteria**
 - Fisher検定が既知の分割表で正しい値を返す
