@@ -84,7 +84,9 @@
   既存テストは変更していない。
   ステップ2（HOMER・汎用CSV/TSVの読込みと検証）とステップ3（TFシンボル正規化、peak集合への紐付け、Level 2表との結合、
   `tf_level3`ブロックとexportファイルの構築）も実装した（`tests/test_motif_import.py` 58件）。
-- **Next task:** Phase 6 ステップ3後のCIチェックポイント1（4環境のCI確認）。その後ステップ4（session state・無効化）へ進む。
+  ステップ4（`invalidate_tf_level2_results`がmotif状態と`tf_level3`をインラインで消去、`reset_motif_results`と
+  `_current_motif_state`の追加。既存テストは無変更で通る）も実装した（`tests/test_motif_import_ui.py`）。
+- **Next task:** Phase 6 ステップ3後のCIチェックポイント1（4環境のCI確認）。その後ステップ5（UI）へ進む。
   Windows/3.12ジョブの再実行にはGitHubへのサインインが必要で、私はできない。新しいpushごとのrunを標本として記録する。
 - **Do not start:** Phase 7（検証と公開）。計画書§1で範囲外としたもの（複数ツールの併存、TF別名・family辞書、motifの
   `n_axes_supported`への算入、de novo結果の取込み、HOMER以外の専用パーサ、サンプルのmotif結果ファイル）。不変条件I-1〜I-6の

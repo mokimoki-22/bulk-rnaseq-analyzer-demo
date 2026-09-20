@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 import brim_atac
 import brim_integration_enrichment
+import brim_motif_import
 import brim_multiomics
 import brim_provenance
 import brim_tf_integration
@@ -315,12 +316,18 @@ def reset_data_results():
 
 
 def invalidate_tf_level2_results():
-    """Clear only the Level 2 TF results and their provenance copy, leaving Level 1 ORA untouched."""
+    """Clear the Level 2 TF results, and with them the Level 3 motif state (it needs Level 2), leaving Level 1 ORA alone.
+
+    The Level 3 keys and the ``tf_level2`` / ``tf_level3`` provenance copies are cleared inline (no helper call) so that
+    the function stays self-contained.
+    """
     st.session_state["integration_tf_results"] = None
+    st.session_state["integration_motif_source"] = None
+    st.session_state["integration_motif_results"] = None
     provenance = st.session_state.get("integration_provenance")
     if isinstance(provenance, dict):
         st.session_state["integration_provenance"] = {
-            key: value for key, value in provenance.items() if key != "tf_level2"
+            key: value for key, value in provenance.items() if key not in ("tf_level2", "tf_level3")
         }
 
 
@@ -330,6 +337,17 @@ def reset_tf_integration_results():
     for key in ("integration_enrichment", "integration_tf_results", "integration_motif_results",
                 "integration_motif_source"):
         st.session_state[key] = None
+
+
+def reset_motif_results():
+    """Clear only the Level 3 motif state (used by the render-time stale check; nothing else calls it)."""
+    st.session_state["integration_motif_source"] = None
+    st.session_state["integration_motif_results"] = None
+    provenance = st.session_state.get("integration_provenance")
+    if isinstance(provenance, dict):
+        st.session_state["integration_provenance"] = {
+            key: value for key, value in provenance.items() if key != "tf_level3"
+        }
 
 
 def reset_integration_results():
@@ -2070,6 +2088,38 @@ def _current_tf_level2_runs(genes):
         return None, "activity"
     return runs, None
 
+
+def _current_peakset_fingerprint(settings):
+    """The fingerprint of the peak sets the current ATAC results and Level 1 settings would produce."""
+    dar = st.session_state.get("atac_results")
+    if dar is None or settings is None:
+        return None
+    try:
+        return brim_motif_import.build_peak_sets(
+            dar, settings["thresholds"], settings["genome_build"], settings["species"]
+        ).peakset_fingerprint
+    except brim_motif_import.MotifImportError:
+        return None
+
+
+def _current_motif_state(genes):
+    """Return (source, state, reason): the Level 3 state only while it is still current (nothing is modified here).
+
+    A motif state is treated as absent when there is no current Level 2 result or when the peak sets it was bound to no
+    longer match the current ATAC results and Level 1 settings (reason ``"level2"`` / ``"peakset"``).  Imports bound to a
+    different peak set are left out of the returned state.
+    """
+    source = st.session_state.get("integration_motif_source")
+    state = st.session_state.get("integration_motif_results")
+    if source is None and state is None:
+        return None, None, None
+    runs, _stale = _current_tf_level2_runs(genes)
+    if not runs:
+        return None, None, "level2"
+    fingerprint = _current_peakset_fingerprint(st.session_state.get("integration_settings"))
+    if source is None or fingerprint is None or source["peakset_fingerprint"] != fingerprint:
+        return None, None, "peakset"
+    return source, brim_motif_import.keep_current_imports(state, fingerprint), None
 
 def _tf_level2_display_table(table, lang):
     """Prepare the Level 2 table for display: separate axes, "not run" markers, no combined score."""
