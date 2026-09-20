@@ -7,6 +7,8 @@ Step 4: TF-only invalidation, the upstream reset chain (design section 15.1), th
 from __future__ import annotations
 
 import ast
+import copy
+import functools
 import io
 import json
 import re
@@ -129,6 +131,7 @@ def test_activity_metadata_is_saved_with_the_activity_result_using_run_time_valu
 
 def test_level1_rerun_clears_stale_ora_tf_and_motif_results_and_keeps_the_new_level1_outputs():
     app = _app()
+    app.default_timeout = APPTEST_TIMEOUT_SECONDS
     app.session_state["integration_enrichment"] = {"concordant_activation": {"stale": True}}
     app.session_state["integration_tf_results"] = {"concordant_activation": {"status": "executed"}}
     app.session_state["integration_provenance"] = {"ora_history": [{"stale": True}], "tf_level2": {"stale": True}}
@@ -157,11 +160,15 @@ _EDGE_COLUMNS = ["peak_id", "gene_id", "gene_symbol", "edge_id", "atac_log2FoldC
 _CAUSAL = re.compile(r"\b(regulates|drives|causes|caused|causal)\b", re.IGNORECASE)
 _NEGATED = "show no evidence that a TF regulates these genes or drives a phenotype"
 _FIXTURE = synthetic_tf_level1_state()
+APPTEST_TIMEOUT_SECONDS = 300
+_LEVEL1_KEYS = ("integration_edge_results", "integration_gene_results", "integration_settings",
+                "integration_summary", "integration_provenance")
 
 
 def _tf_app(with_activity=True, language="English"):
     state = _FIXTURE
     app = _app()
+    app.default_timeout = APPTEST_TIMEOUT_SECONDS        # CI runners (especially Windows) are much slower than 60 s allows
     deg = state["deg_results"].assign(baseMean=10.0, pvalue=lambda d: d["padj"], stat=lambda d: d["log2FoldChange"])
     samples = list(state["metadata"].index)
     counts = pd.DataFrame(np.random.default_rng(0).integers(5, 50, size=(len(deg), len(samples))),
@@ -187,7 +194,8 @@ def _tf_app(with_activity=True, language="English"):
     return app
 
 
-def _level1(app):
+def _level1_real(app):
+    """Run Level 1 through the real button."""
     app.run()
     assert not app.exception, [e.value for e in app.exception]
     app.button(key="integration_run").click().run()
@@ -196,12 +204,27 @@ def _level1(app):
     return app
 
 
-def _level2(app, set_name="concordant_activation"):
-    app.selectbox(key="tf_level2_set").set_value(set_name).run()
-    app.button(key="tf_level2_run").click().run()
+@functools.lru_cache(maxsize=1)
+def _level1_snapshot():
+    """The stored Level 1 outputs of one real run, so most tests do not repeat the slow full-app Level 1 run."""
+    app = _level1_real(_tf_app())
+    return {key: copy.deepcopy(app.session_state[key]) for key in _LEVEL1_KEYS}
+
+
+def _level1(app):
+    """Put the (real-run) Level 1 outputs in place and render once."""
+    for key, value in copy.deepcopy(_level1_snapshot()).items():
+        app.session_state[key] = value
+    app.run()
     assert not app.exception, [e.value for e in app.exception]
     return app
 
+
+def _level2(app, set_name="concordant_activation"):
+    app.selectbox(key="tf_level2_set").set_value(set_name)
+    app.button(key="tf_level2_run").click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    return app
 
 def _texts(app):
     elements = list(app.markdown) + list(app.caption) + list(app.warning) + list(app.info) + list(app.error)
@@ -219,7 +242,7 @@ def test_level2_controls_are_hidden_before_level1_and_shown_after_it():
     assert not app.exception
     assert not [b for b in app.button if b.key == "tf_level2_run"]
     assert any("Level 3 (motif) is not available in this version" in text for text in _texts(app))
-    _level1(app)
+    _level1_real(app)
     button = [b for b in app.button if b.key == "tf_level2_run"]
     assert len(button) == 1 and not button[0].disabled
     texts = " ".join(_texts(app))
@@ -239,6 +262,7 @@ def test_level2_run_shows_separate_axes_not_run_motif_and_permanent_limitations(
     texts = " ".join(_texts(app))
     assert "Limitations" in texts and "not independent evidence" in texts and "about 10% of null TFs" in texts
     assert "Motif enrichment: not run" in texts and "sorting aid, not a statistic" in texts
+    assert "How to read the table" in texts and "not_tested = DESeq2 gave NA" in texts and "not \"not significant\"" in texts
     assert "corrected within the selected gene set across the TFs that were tested only" in texts
     runs = app.session_state["integration_tf_results"]
     assert set(runs) == {"concordant_activation"} and runs["concordant_activation"]["status"] == "executed"
@@ -291,14 +315,17 @@ def test_empty_gene_set_is_reported_and_not_tested():
 
 
 def test_small_gene_sets_show_the_exploratory_warning_when_flagged():
+    app = _level1(_tf_app())
+    executed = 0
     for set_name in ("discordant_open_down", "rna_only_on_mapped_peak", "concordant_repression"):
-        app = _level2(_level1(_tf_app()), set_name)
+        _level2(app, set_name)
         run = app.session_state["integration_tf_results"][set_name]
         if run["status"] != "executed":
             continue
+        executed += 1
         shown = any("fewer than 20 genes" in text for text in _texts(app))
         assert shown == run["gene_set"]["small_gene_set_warning"], set_name
-
+    assert executed >= 1
 
 def test_reactivity_change_clears_only_level2_and_keeps_ora_results():
     app = _level2(_level1(_tf_app()))
@@ -456,3 +483,19 @@ def test_level1_provenance_and_ora_history_are_unchanged_by_the_level2_export():
     assert json.loads(archive.read("Integration/ORA/history.json")) == []
     notebook = archive.read("Integration/analysis_notebook.md").decode("utf-8")
     assert "tf_level2" in notebook
+
+def test_export_records_each_gene_sets_own_min_targets_and_alpha_when_the_sliders_changed_between_runs():
+    app = _level1(_tf_app())
+    _level2(app, "concordant_activation")
+    app.slider(key="tf_level2_min_targets").set_value(20).run()
+    app.selectbox(key="tf_level2_alpha").set_value(0.1).run()
+    _level2(app, "atac_only")
+    archive, manifest = _export(app)
+    block = manifest["settings"]["integration"]["tf_level2"]
+    assert block["settings_vary_between_gene_sets"] is True and block["min_targets"] is None and block["alpha"] is None
+    per_set = {entry["name"]: (entry["min_targets"], entry["alpha"]) for entry in block["gene_sets"]}
+    assert per_set == {"concordant_activation": (10, 0.05), "atac_only": (20, 0.1)}
+    candidates = pd.read_csv(io.BytesIO(archive.read("Integration/tf_candidates.csv")))
+    rows = candidates.groupby("gene_set")[["min_targets", "alpha"]].first().to_dict("index")
+    assert rows == {"concordant_activation": {"min_targets": 10, "alpha": 0.05},
+                    "atac_only": {"min_targets": 20, "alpha": 0.1}}

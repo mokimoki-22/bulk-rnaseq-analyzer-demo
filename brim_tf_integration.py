@@ -527,6 +527,10 @@ def run_level2(
     table = attach_tf_activity(table, activity_scores, sample_conditions, str(contrasts["reference"]),
                                str(contrasts["test"]), source=network_source)
     table = count_supported_axes(add_motif_placeholder(table), alpha)
+    # The settings differ between gene sets when the user changes the sliders between runs, so each row keeps
+    # the values that produced it.
+    table["min_targets"] = int(min_targets)
+    table["alpha"] = float(alpha)
     result.update(status="executed", table=table, n_tests=int(enrichment.attrs["n_tests"]),
                   n_tfs_below_min_targets=int(enrichment.attrs["n_tfs_below_min_targets"]),
                   match_report=enrichment.attrs["match_report"])
@@ -553,16 +557,27 @@ def build_tf_summary(runs: Mapping[str, Mapping[str, Any]], network_info: Mappin
     ordered = [runs[name] for name in sorted(runs)]
     first = ordered[0]
     executed = [run for run in ordered if run.get("status") == "executed"]
+    min_targets_values = {run["settings"]["min_targets"] for run in ordered}
+    alpha_values = {run["settings"]["alpha"] for run in ordered}
+    matching = next((dict(run["match_report"]) for run in executed), None)
+    if matching is not None:
+        matching.pop("min_targets", None)      # a per-gene-set setting, recorded in gene_sets instead
     return {
         "status": "executed" if executed else "no_executed_gene_set",
         "network": dict(network_info),
-        "min_targets": first["settings"]["min_targets"], "alpha": first["settings"]["alpha"],
+        # Stated once only when every gene set used the same value; otherwise see each entry of gene_sets.
+        "min_targets": min_targets_values.pop() if len(min_targets_values) == 1 else None,
+        "alpha": alpha_values.pop() if len(alpha_values) == 1 else None,
+        "settings_vary_between_gene_sets": len({run["settings"]["min_targets"] for run in ordered}) > 1
+        or len({run["settings"]["alpha"] for run in ordered}) > 1,
         "fisher_alternative": FISHER_ALTERNATIVE, "bh_scope": first["settings"]["bh_scope"],
         "bh_scope_note": BH_SCOPE_NOTE, "bh_scope_note_ja": BH_SCOPE_NOTE_JA,
         "universe": first["universe"],
         "gene_sets": [{**run["gene_set"], "status": run["status"], "n_tests": run["n_tests"],
-                       "n_tfs_below_min_targets": run["n_tfs_below_min_targets"]} for run in ordered],
-        "symbol_matching": next((run["match_report"] for run in executed), None),
+                       "n_tfs_below_min_targets": run["n_tfs_below_min_targets"],
+                       "min_targets": run["settings"]["min_targets"], "alpha": run["settings"]["alpha"]}
+                      for run in ordered],
+        "symbol_matching": matching,
         "expression_rule": {"thresholds": {k: v for k, v in first["settings"]["thresholds"].items() if k.startswith("rna_")},
                             "supported_requires": "not NA, padj <= rna_padj, |log2FC| >= rna_lfc, log2FC != 0"},
         "activity_rule": ACTIVITY_RULE, "activity_parameters": first["activity_meta"] or "not recorded",
@@ -571,7 +586,8 @@ def build_tf_summary(runs: Mapping[str, Mapping[str, Any]], network_info: Mappin
         "n_axes_supported_note": "display-only sorting aid, not a statistic",
         "external_services_used": [],
         "run_history": [{"gene_set": run["set_name"], "status": run["status"], "n_genes": run["gene_set"]["n_genes"],
-                         "n_tests": run["n_tests"], "fingerprints": run["fingerprints"]} for run in ordered],
+                         "n_tests": run["n_tests"], "min_targets": run["settings"]["min_targets"],
+                         "alpha": run["settings"]["alpha"], "fingerprints": run["fingerprints"]} for run in ordered],
         "limitations_text": list(LIMITATIONS_EN), "limitations_text_ja": list(LIMITATIONS_JA),
     }
 

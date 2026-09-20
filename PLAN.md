@@ -48,8 +48,15 @@
   保存結果を消去するPhase 4挙動の変更（承認済み）も含む。ローカルの全体テストは184件成功、9件は既知のPyDESeq2
   API不一致（Phase 5起因ではない）。陰性対照は固定seed 0で期待どおり（調整なし）。Level 3/motif、新規ネットワーク通信・
   依存関係、RNA-only workflowの変更はない。
+- **Phase 5 CI status:** 実装commit `dabbb32` のrun `35518519244` は、Ubuntu 3.11/3.12とWindows 3.11が成功、
+  **Windows 3.12が失敗**（失敗時のログはサインインが必要で私は閲覧できず、原因は未確認）。同runの所要時間は従来の約8分から
+  33〜57分に増えた（追加したAppTestが遅い）ため、時間切れ（AppTestの既定60秒）の疑いが強いが未確認。対応として、
+  AppTestのタイムアウトを300秒にし、Level 1をボタン操作で作る回数を1回に減らした（実行時間を約4割短縮）。
+  監査役Aの指摘（manifestの`min_targets`/`alpha`を集合ごとに記録、PLANの書式）も同commitで是正する。
+  是正commitの4環境CI成功と、A・Bの再監査GOまでPhase 5は完了としない。
 - **Next task:** 計画書§7のステップ8: 本commitのGitHub Actions（4環境）を確認し、監査役A・Bの実装後監査を受ける。
-  両者GOの後にのみPhase 5を完了とする。- **Do not start:** Phase 6（motif/Level 3の操作・BED出力・取り込み）。計画書§1「追加しないもの」の全項目。
+  両者GOの後にのみPhase 5を完了とする。
+- **Do not start:** Phase 6（motif/Level 3の操作・BED出力・取り込み）。計画書§1「追加しないもの」の全項目。
   不変条件I-1〜I-6の変更・放棄、新規ネットワーク通信・依存関係、RNA-only workflowの変更（I-6.1）、
   既存テストの変更・削除。
 

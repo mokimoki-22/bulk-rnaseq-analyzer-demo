@@ -489,3 +489,28 @@ def test_result_columns_carry_no_combined_score_and_no_causal_wording(state):
     for sentence in tf.LIMITATIONS_EN:
         stripped = sentence.replace("show no evidence that a TF regulates these genes or drives a phenotype", "")
         assert not causal.search(stripped), sentence
+
+def test_summary_records_min_targets_and_alpha_per_gene_set_when_runs_used_different_settings(state):
+    first = _run(state, set_name="concordant_activation", min_targets=10, alpha=0.05)
+    second = _run(state, set_name="atac_only", min_targets=20, alpha=0.1)
+    block = tf.build_tf_summary({"concordant_activation": first, "atac_only": second}, {"source": "collectri"})
+    assert block["settings_vary_between_gene_sets"] is True
+    assert block["min_targets"] is None and block["alpha"] is None       # no single value is stated
+    per_set = {entry["name"]: (entry["min_targets"], entry["alpha"]) for entry in block["gene_sets"]}
+    assert per_set == {"concordant_activation": (10, 0.05), "atac_only": (20, 0.1)}
+    history = {entry["gene_set"]: (entry["min_targets"], entry["alpha"]) for entry in block["run_history"]}
+    assert history == per_set
+    assert "min_targets" not in block["symbol_matching"]
+    combined = tf.combine_tf_tables({"concordant_activation": first, "atac_only": second})
+    rows = combined.groupby("gene_set")[["min_targets", "alpha"]].first().to_dict("index")
+    assert rows == {"concordant_activation": {"min_targets": 10, "alpha": 0.05},
+                    "atac_only": {"min_targets": 20, "alpha": 0.1}}
+    assert (combined.groupby("gene_set")["min_targets"].nunique() == 1).all()
+
+
+def test_summary_states_one_value_only_when_every_gene_set_used_it(state):
+    runs = {"concordant_activation": _run(state), "atac_only": _run(state, set_name="atac_only")}
+    block = tf.build_tf_summary(runs, {"source": "collectri"})
+    assert block["settings_vary_between_gene_sets"] is False
+    assert block["min_targets"] == 10 and block["alpha"] == 0.05
+    assert all(entry["min_targets"] == 10 and entry["alpha"] == 0.05 for entry in block["gene_sets"])

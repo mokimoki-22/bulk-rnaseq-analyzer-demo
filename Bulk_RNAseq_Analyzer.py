@@ -2208,6 +2208,19 @@ def _render_tf_level2_ui(genes, edges, lang):
         "motif濃縮: 未実行（レベル3はこの版では利用できません）。支持軸数は並べ替えの補助であり、統計量ではありません。",
     ))
     table = run["table"]
+    st.caption(ui(
+        "How to read the table: expression status — supported_up/supported_down = tested and past the RNA "
+        "thresholds; not_significant = tested but below them; not_tested = DESeq2 gave NA (values are blank, this is "
+        "not \"not significant\"); not_in_rna_results = the TF is not in the RNA table. Activity status — "
+        "separated_up/separated_down = every test sample is above/below every reference sample; not_separated = "
+        "the groups overlap; not_estimated = no usable score; insufficient_samples = fewer than 3 samples in a "
+        "group; not run = TF Activity was not run.", lang,
+        "表の読み方: 発現の状態 — supported_up/supported_down = 検定済みでRNAの閾値を満たす; not_significant = "
+        "検定済みだが閾値未満; not_tested = DESeq2がNA（値は空欄。「有意でない」ではありません）; "
+        "not_in_rna_results = RNA表にそのTFがない。activityの状態 — separated_up/separated_down = 比較群の全サンプルが"
+        "基準群の全サンプルより高い/低い; not_separated = 群が重なる; not_estimated = 使えるスコアがない; "
+        "insufficient_samples = いずれかの群が3サンプル未満; 未実行 = TF Activityを実行していない。",
+    ))
     st.dataframe(_tf_level2_display_table(table, lang), use_container_width=True)
     if table.empty:
         return
