@@ -2,12 +2,30 @@
 
 - 対応設計書: `docs/BRIM_RNA_ATAC_Integration_Design_v2.md`（版2.0, 2026-09-04）
 - 現在Phase: **Phase 5 完了、Phase 6 実装中**
-- 最終更新: 2026-09-21
+- 最終更新: 2026-10-02
 
 ## Current development status
 
 この節を、PCやCodexを切り替えて作業を再開するときの唯一の現在地とする。
 実装前に`AGENTS.md`、この節、関連する`ARCHITECTURE.md`と設計書を確認すること。
+
+- **次PCでの再開手順（2026-10-02）:** 最新の共有commitは`60f7702`（`main`へpush済み）。別PCの既存cloneで
+  `git status --short --branch`を確認し、未コミット変更がなければ`git pull --ff-only origin main`を実行する。
+  `git log -1 --oneline`が`60f7702`以降であることを確認してから作業する。環境未作成の場合だけ
+  `.venv`を作り`python -m pip install -r requirements.txt`を実行し、READMEの方法でアプリを起動する。
+- **直近の作業:** commit `60f7702`で、同梱RNAサンプルの重複gene symbolがDEGで発生させる
+  `cannot reindex on an axis with duplicate labels`を修正した。同名行のcountを既存規則で合算し、件数をUIとprovenanceに記録する。
+  RNA 17件、ATAC 46件の関連テストが成功。Bulk RNAと同じ12サンプル・3群を持つ人工ATACデータを追加した。
+- **マルチオミクスサンプルの手動操作:** UploadタブでRNAサンプルを読み込み、12サンプルを
+  `Ctrl_1..4`→`Control`、`TrtA_1..4`→`Treatment_A`、`TrtB_1..4`→`Treatment_B`に割り当て、
+  DEGは`Control`をreference、`Treatment_A`をtestとして実行する。Multi-omicsのATAC count matrixに
+  `sample_data/BRIM_ATAC_bulk_matched_peak_counts.csv`を読み込み、同名サンプルを
+  `sample_data/BRIM_ATAC_bulk_matched_metadata.csv`と同じ3群へ割り当て、同じcontrastでDARを実行する。
+  peak–gene mapping入力には`sample_data/BRIM_ATAC_bulk_matched_peak_gene_mapping.csv`を使う。
+  これらは機能確認用の人工データで、生物学的結論には使わない。
+- **CI:** `60f7702`のpush後にGitHub Actions 4環境の結果をまだ確認していない。再開時に確認して記録する。
+- **Phase 6で残る作業:** この実サンプルの手動UI経路確認に加え、motif結果ファイルの実アップロード経路と監査役A・Bの最終監査。
+  これらが完了するまでPhase 6を完了扱いにせず、Phase 7を開始しない。
 
 - **Current phase:** Phase 5 完了（2026-09-21）。Phase 6（motifインポート、Level 3）は、計画書にA・BがGOを発行し監査役Cが着手を決定した（2026-09-21）ため、実装中
 - **Status:** Phase 4完了（2026-09-20）。commit `d2674ec`のGitHub Actions（run `35507389636`、
@@ -103,8 +121,8 @@
   ステップ6（export・manifestの`tf_level3`: 現在のLevel 2とpeak集合が一致するときだけ、現在の状態から再構築して出力。
   保存済みのコピーは出力しない）とステップ7（設計書§12.4・§14.3、ARCHITECTURE、README、CHANGELOG、
   `docs/motif_analysis_guide.md`）も実装した。AppTestは3件（上限どおり）。
-- **Next task:** ステップ8: ローカルの全体テスト、push、4環境のCI確認、実際のアップロード経路の手動確認（CIではない手動確認として
-  記録）、監査役A・Bの実装後監査。ステップ3後のCIチェックポイント1の結果は確認でき次第記録する。
+- **Next task:** Phase 6 ステップ8の残り: commit `60f7702`の4環境CI結果確認、実際のアップロード経路の手動確認（CIではない手動確認として
+  記録）、監査役A・Bの実装後最終監査。ステップ3後のCIチェックポイント1の結果は確認でき次第記録する。
   **追記（2026-10-02）:** ステップ6・7と監査是正を含むローカル全体テストは270件成功。9件の失敗は既知の
   PyDESeq2 API不一致（`DeseqDataSet`が`design=`を受けない）で、今回の変更に触れないRNA/DAR実エンジン経路で発生した。
   motif関連83件は全件成功。監査役A・Bはcommit/CI前の再監査でGO。Phase 6の完了判定はpush後のCI・実アップロード経路の
