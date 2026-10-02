@@ -1,8 +1,7 @@
 """Phase 6 Level 3 session-state, invalidation and (later) UI regression tests.
 
 Step 4: the Level 3 clearing rules and the stale check, run against the app's real functions (extracted from the app
-source, so no heavy full-app run is needed).  Step 5: two AppTests for the Level 3 UI (at most three in total, plan D14;
-the third covers the export in step 6).
+source, so no heavy full-app run is needed).  Step 5: two AppTests for the Level 3 UI.  Step 6: the third (and last) AppTest, for the export (plan D14: at most three).
 """
 
 from __future__ import annotations
@@ -11,6 +10,7 @@ import ast
 import copy
 import hashlib
 import io
+import json
 import types
 import zipfile
 from pathlib import Path
@@ -20,7 +20,7 @@ import pytest
 import brim_motif_import as mi
 from motif_support import THRESHOLDS, generic_motif_csv, homer_known_text, synthetic_dar_table
 from rna_support import capture_downloads
-from test_tf_integration_ui import _FIXTURE, _level1, _level2, _table, _texts, _tf_app
+from test_tf_integration_ui import _FIXTURE, _export, _level1, _level2, _table, _texts, _tf_app
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -273,3 +273,56 @@ def test_an_imported_result_fills_the_motif_columns_with_badges_and_a_changed_pe
     assert app.session_state["integration_tf_results"] is not None
     assert any("Level 3 results were cleared" in text for text in _texts(app))
     assert "tf_level3" not in (app.session_state["integration_provenance"] or {})
+
+# ----------------------------------------------------------------------------------------------
+# Step 6: the export (the third and last AppTest; the file builders themselves are unit-tested in test_motif_import.py)
+# ----------------------------------------------------------------------------------------------
+
+def test_export_carries_the_current_level3_files_and_manifest_block_and_drops_them_when_the_peak_set_changed():
+    app = _level3_app()
+    with capture_downloads():
+        app.button(key="tf_level3_prepare").click().run()
+    planted = _FIXTURE["planted_tf"]
+    rows = [(f"{planted}(Zf)/Fixture/Homer", "N", "1e-12", "-27", "0.02", "50", "40%", "800", "17%"),
+            ("Myc(bHLH)/Fixture/Homer", "N", "0.1", "-2", "NA", "5", "4%", "400", "9%")]
+    app.session_state["integration_motif_results"] = mi.import_uploaded_result(
+        None, _mouse_peak_sets(), homer_known_text(rows).encode("utf-8"), "known.txt", "homer_known", None, "opening",
+        {"analysis_source": "brim_generated", "genome_attested": True}, {planted, "Myc"}, "2026-09-21T00:00:00")
+    provenance = dict(app.session_state["integration_provenance"])
+    provenance["tf_level3"] = {"stale_copy": "must not be exported"}                       # a stored copy must never be exported
+    app.session_state["integration_provenance"] = provenance
+
+    app.session_state["tf_level3_alpha"] = 0.01
+    archive, manifest = _export(app)
+    names = set(archive.namelist())
+    assert {"MotifAnalysis/opened_peaks_padj0.05_lfc1.bed", "MotifAnalysis/closed_peaks_padj0.05_lfc1.bed",
+            "MotifAnalysis/all_peaks_background.bed", "MotifAnalysis/motif_analysis_README.txt",
+            "Integration/motif_results.csv", "Integration/motif_symbol_map.csv", "Integration/motif_import_record.json",
+            "Integration/tf_candidates_with_motif.csv", "Integration/tf_candidates.csv", "Integration/tf_summary.json"} <= names
+    block = manifest["settings"]["integration"]["tf_level3"]
+    assert "stale_copy" not in block and block["status"] == "imported" and set(block["imports"]) == {"opening"}
+    assert block["external_services_used"] == [] and block["external_tool_executed_by_brim"] is False
+    assert block["peak_sets"]["genome_build"] == "mm10" and block["imports"]["opening"]["tool"] == "homer_known"
+    assert block["imports"]["opening"]["threshold_matches_current"] is True
+    assert block["motif_alpha_display_threshold"] == 0.01
+    assert manifest["settings"]["integration"]["tf_level2"]["motif_axis"] == "not_run"       # Level 2's own statement is unchanged
+    assert manifest["services"]["external_services_used"] == []
+    source = app.session_state["integration_motif_source"]
+    for name, digest in source["exported_files_sha256"].items():                              # the shipped files match the record
+        assert hashlib.sha256(archive.read(name)).hexdigest() == digest
+    import pandas as pd
+    plain = pd.read_csv(io.BytesIO(archive.read("Integration/tf_candidates.csv")))
+    assert set(plain["motif_status"]) == {"not_run"}                                          # the Level 2 CSV is unchanged by design
+    combined = pd.read_csv(io.BytesIO(archive.read("Integration/tf_candidates_with_motif.csv")))
+    assert combined.loc[combined["tf_symbol"] == planted, "motif_opening_status"].iloc[0] == mi.STATUS_GT
+    assert list(combined["n_axes_supported"]) == list(plain["n_axes_supported"])
+    assert "NaN" not in archive.read("Provenance/manifest.json").decode("utf-8")              # allow_nan=False JSON
+    assert "tf_level3" in archive.read("Integration/analysis_notebook.md").decode("utf-8")
+    assert json.loads(archive.read("Integration/motif_import_record.json"))["history"]
+
+    # A changed ATAC result changes the peak set: the export leaves Level 3 out (and keeps Level 2).
+    app.session_state["atac_results"] = synthetic_dar_table().assign(padj=lambda d: d["padj"] * 0.5)
+    archive, manifest = _export(app)
+    names = set(archive.namelist())
+    assert not [n for n in names if n.startswith("MotifAnalysis/") or "motif_" in n or n.endswith("tf_candidates_with_motif.csv")]
+    assert "Integration/tf_candidates.csv" in names and "tf_level3" not in manifest["settings"]["integration"]

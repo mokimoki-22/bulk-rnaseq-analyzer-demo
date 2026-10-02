@@ -180,7 +180,7 @@ def test_readme_states_the_conditions_the_bed_files_and_the_required_sentences()
     for command in mi.build_homer_commands(peak_sets):
         assert command in text
     assert "BRIM does not bundle or run it" in text and "-size 200 is an example value" in text
-    assert "WSL" in text
+    assert "official documentation" in text and "WSL" not in text
     assert text == mi.render_motif_readme(peak_sets, "9.9.9", "2026-09-21T00:00:00")          # a pure function
     unavailable = mi.render_motif_readme(_sets(synthetic_dar_table(), build="hg19"), "9.9.9", "t")
     assert "hg19" in unavailable and "perl configureHomer" not in unavailable
@@ -713,6 +713,7 @@ def test_the_summary_block_records_the_bed_preparation_the_imports_and_the_fixed
     assert block["peak_sets"]["genome_build"] == "hg38" and block["peak_sets"]["coordinate_convention"] == mi.COORDINATE_CONVENTION
     assert block["peak_sets"]["counts"]["n_background"] == peak_sets.counts["n_background"]
     assert block["representative_motif_rule"] == mi.REPRESENTATIVE_MOTIF_RULE and "counts nothing" in block["motif_alpha_display"]
+    assert block["motif_alpha_display_threshold"] == 0.05
     assert block["limitations_text"] == list(mi.LIMITATIONS_EN) and block["limitations_text_ja"] == list(mi.LIMITATIONS_JA)
     assert "Level 2 run only" in block["tf_level2_motif_axis_note"] and block["independence_note"] == mi.INDEPENDENCE_NOTE
     json.dumps(block, allow_nan=False)                                                                     # NaN-free JSON
@@ -814,3 +815,30 @@ def test_the_upload_core_reads_binds_and_returns_a_new_state_without_touching_th
         mi.import_uploaded_result(first, peak_sets, generic_motif_csv().encode("utf-8"), "g.csv", "generic", None, "opening",
                                   declaration, REFERENCE, "t")
     assert set(first["imports"]) == {"opening"} and len(first["history"]) == 1                # a failed import changes nothing
+
+# ----------------------------------------------------------------------------------------------
+# Step 7: the guide (its command block must be exactly what the code generates; no uncited external claims)
+# ----------------------------------------------------------------------------------------------
+
+GUIDE = pathlib.Path(__file__).resolve().parents[1] / "docs" / "motif_analysis_guide.md"
+
+
+def test_the_guide_command_block_is_exactly_what_the_code_generates():
+    text = GUIDE.read_text(encoding="utf-8")
+    block = text.split("## BRIMが表示するコマンド", 1)[1].split("```text\n", 1)[1].split("```", 1)[0]
+    assert block.strip().splitlines() == mi.build_homer_commands(_sets(synthetic_dar_table(), build="hg38"))
+    mm10 = mi.build_homer_commands(_sets(synthetic_dar_table(), build="mm10", species="Mouse"))
+    assert [line.replace("hg38", "mm10") for line in block.strip().splitlines()] == mm10
+
+
+def test_the_guide_makes_no_uncited_external_claims_and_has_no_causal_wording():
+    text = GUIDE.read_text(encoding="utf-8")
+    assert "http" not in text and "www." not in text                                # no URLs are given (none verified)
+    for pattern in mi.CAUSAL_PATTERNS:
+        assert not re.search(pattern, text, re.IGNORECASE)
+    for required in ("別のソフトウェアで、固有のライセンス・利用条件があります", "同梱も実行もしません", "公式文書で確認",
+                     "未検証", "motif_status=not_run", "tf_candidates_with_motif.csv", "「濃縮されなかった」ではありません",
+                     "支持軸数にはmotifを数えません", "-size 200`は例"):
+        assert required in text, required
+    for claim in ("最も精度", "推奨", "標準的な", "benchmark", "most accurate"):        # no performance or recommendation claims
+        assert claim not in text

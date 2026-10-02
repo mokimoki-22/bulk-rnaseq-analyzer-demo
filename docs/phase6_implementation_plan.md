@@ -105,7 +105,7 @@
   ```
   - 1行目は「HOMERにgenomeが未導入の場合のみ。この手順は利用者がBRIMの外で実行し、データをダウンロードすることがある」と注記する。
 - 平易な手順（英日）:
-  1. 外部ツールを、そのツールの文書に従って用意する。HOMERはLinux/macOS系の環境向けなので、Windowsでは通常WSLなどが必要（詳細はツールの公式文書で確認する）。
+  1. 外部ツールを、そのツールの公式文書に従って用意する。対応OSとセットアップ要件は公式文書で確認する。
   2. BEDファイルを1つのフォルダに置く。
   3. 上のコマンドを実行する。
   4. `homer_opening/knownResults.txt`などを、BRIMのLevel 3の取り込み欄で、opening/closingを選んで読み込む。
@@ -204,7 +204,7 @@
 - `tf_level3`の内容:
   - `peak_sets`: 閾値、genome build、species、座標規約（0-based half-open）、背景の定義（英日）、`counts`、BED名とsha256、`peakset_fingerprint`、`n_ids_sanitized`。
   - `imports`: peak集合ごとに、`import_id`（ファイルsha256・peak集合・fingerprintのハッシュ）、`tool`、`tool_version`（未入力は`"not provided"`）、`motif_database`（同）、ソースファイル（名前・sha256・サイズ・エンコーディング・区切り）、列対応、紐付け方式、申告した閾値と`threshold_matches_current`、背景の申告と`background_differs_from_brim`、`genome_attested`、件数（行・欠損・照合）、未照合の件数と先頭50件、警告。
-  - 規則: `symbol_normalization_rule`、`representative_motif_rule`、`motif_alpha_display`、`n_axes_note`、`independence_note`。
+  - 規則: `symbol_normalization_rule`、`representative_motif_rule`、数値の`motif_alpha_display_threshold`と説明用の`motif_alpha_display`、`n_axes_note`、`independence_note`。
   - 共通: `limitations_text`（英日）、`external_services_used: []`、`external_tool_executed_by_brim: false`、`exported_files_sha256`。
   - 履歴: `import_history`。
 - 単一の源: ブロックは`integration_motif_source`と`integration_motif_results`だけから組み立てる（`build_motif_summary`）。無効化のたびに`pop`する。
@@ -303,7 +303,7 @@ def import_motif_result(table, peak_sets, peak_set, declaration, reference_symbo
 def attach_motif_enrichment(tf_table, motif_tf_tables, peak_sets=PEAK_SETS, alpha=0.05,
                             source_prepared=False) -> pd.DataFrame
 def motif_only_tfs(tf_table, motif_tf_table) -> pd.DataFrame
-def build_motif_summary(source, imports) -> dict                # tf_level3
+def build_motif_summary(source, imports, alpha) -> dict         # tf_level3（表示用閾値を含む）
 def build_motif_export_files(peak_sets, source, imports, tf_runs) -> dict[str, str]
 def level2_limitations_for_display(limits, motif_present) -> list[str]
 LIMITATIONS_EN / _JA, BACKGROUND_DEFINITION / _JA, SYMBOL_RULE_TEXT / _JA, STATUS_* 定数

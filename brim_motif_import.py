@@ -271,10 +271,9 @@ def render_motif_readme(peak_sets: PeakSets, app_version: str, generated_at: str
         f"not tested and excluded / 未検定で除外: {counts['n_not_tested_excluded']}",
         "",
         "How to use / 使い方",
-        "1. Prepare the external tool by following that tool's own documentation (BRIM does not bundle or run it). "
-        "HOMER is intended for Linux/macOS-type environments, so on Windows a layer such as WSL is usually needed; "
-        "check the tool's documentation. / 外部ツールは、そのツールの文書に従って用意してください"
-        "（BRIMは同梱も実行もしません）。HOMERはLinux/macOS系向けで、Windowsでは通常WSLなどが必要です。",
+        "1. Prepare the external tool by following that tool's official documentation (BRIM does not bundle or run it). "
+        "Verify supported operating systems and setup requirements there. / 外部ツールは、そのツールの公式文書に従って用意してください"
+        "（BRIMは同梱も実行もしません）。対応OSとセットアップ要件も公式文書で確認してください。",
         "2. Put the BED files in one folder. / BEDファイルを1つのフォルダに置きます。",
         "3. Run the command(s) below outside BRIM. -size 200 is an example value. / 下のコマンドをBRIMの外で実行します。"
         "-size 200は例です。",
@@ -979,7 +978,8 @@ def motif_symbol_map_table(imports: Mapping[str, Mapping[str, Any]]) -> pd.DataF
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def build_motif_summary(source: Mapping[str, Any], state: Mapping[str, Any] | None) -> dict[str, Any]:
+def build_motif_summary(source: Mapping[str, Any], state: Mapping[str, Any] | None,
+                        alpha: float = 0.05) -> dict[str, Any]:
     """Build the ``tf_level3`` manifest block from the BED preparation record and the current imports (single source)."""
     imports = (state or {}).get("imports", {})
     peak_set_keys = ("thresholds", "genome_build", "species", "coordinate_convention", "counts", "bed_sha256",
@@ -991,7 +991,8 @@ def build_motif_summary(source: Mapping[str, Any], state: Mapping[str, Any] | No
         "imports": {peak_set: imports[peak_set]["record"] for peak_set in PEAK_SETS if peak_set in imports},
         "import_history": list((state or {}).get("history", [])),
         "symbol_normalization_rule": SYMBOL_RULE_TEXT, "symbol_normalization_rule_ja": SYMBOL_RULE_TEXT_JA,
-        "representative_motif_rule": REPRESENTATIVE_MOTIF_RULE, "motif_alpha_display": "display only; counts nothing",
+        "representative_motif_rule": REPRESENTATIVE_MOTIF_RULE,
+        "motif_alpha_display_threshold": float(alpha), "motif_alpha_display": "display only; counts nothing",
         "n_axes_note": N_AXES_NOTE, "n_axes_note_ja": N_AXES_NOTE_JA, "independence_note": INDEPENDENCE_NOTE,
         "tf_level2_motif_axis_note": "tf_level2.motif_axis describes the Level 2 run only; the Level 3 state is in this block.",
         "limitations_text": list(LIMITATIONS_EN), "limitations_text_ja": list(LIMITATIONS_JA),
@@ -1025,7 +1026,7 @@ def build_motif_export_files(bundle: Mapping[str, str] | None, source: Mapping[s
         return files
     files["Integration/motif_results.csv"] = motif_results_table(imports).to_csv(index=False)
     files["Integration/motif_symbol_map.csv"] = motif_symbol_map_table(imports).to_csv(index=False)
-    summary = build_motif_summary(source, state)
+    summary = build_motif_summary(source, state, alpha)
     files["Integration/motif_import_record.json"] = json.dumps(
         {"imports": summary["imports"], "history": summary["import_history"]}, indent=2, ensure_ascii=False, allow_nan=False)
     frames = []

@@ -936,6 +936,21 @@ HOMERの既定背景はGC含量を揃えたランダムゲノム配列である�
 
 opening と closing は別々のpeak集合として保持し、`peak_set` 列で区別する。1ファイルに混在する場合は分割を要求する。
 
+**Phase 6実装での確定事項（監査役C決定、A・B確認、2026-09-21）**
+
+- 結合は`fold_symbol(tf_symbol)`をキーとし、Level 2の保存済みの表は変更しない。opening/closingはLevel 2の遺伝子集合とは
+  自動で対応付けず、`motif_opening_*`・`motif_closing_*`の列として別々に表示する。`n_axes_supported`にはmotifを算入しない
+  （レベル2の3軸のみ。motifは別の列）。motifのpadjはBRIMで補正・再計算・結合しない。
+- 背景は「検定済み（padjとlog2FCがNAでない）の全peak」とし、件数と定義を画面・README・manifestに記録する。BED出力の
+  座標は0-based half-openで、染色体名は変換しない。
+- HOMER `knownResults.txt`の認識は前方一致（Motif Name、P-value、q-value (Benjamini)）で、ツールが報告した値をそのまま読む。
+  この認識規則は実際の出力に対して**未検証**であり、実データでの検証はPhase 7に送る。
+- 古い取り込みの排除: peak集合のfingerprint（閾値・genome build・種・座標規約・染色体名の表記・BED本文のsha256）が
+  変わったmotif結果は、どこでも不在として扱い、描画時に消去する。取り込み時の閾値の食い違いは警告（記録）にとどめる。
+- 出力は`MotifAnalysis/`（BED3種とREADME）、`Integration/motif_results.csv`、`motif_symbol_map.csv`、
+  `tf_candidates_with_motif.csv`、`motif_import_record.json`、manifestの`tf_level3`ブロック（別ブロック）。
+  `Integration/tf_candidates.csv`は設計上`motif_status=not_run`のままとする。
+
 ### 12.5 内蔵promoter motif表を採用しない判断（記録）
 
 検討したが初期リリースには含めない。判断の根拠を将来の再検討のために記録する。
@@ -1045,10 +1060,34 @@ run_level2(summary, set_name, network, rna_results, thresholds, contrasts, activ
 combine_tf_tables(runs) -> pd.DataFrame
 get_tf_targets_in_set(tf_symbol, gene_set, network, edges) -> pd.DataFrame
 build_tf_summary(runs, network_info) -> dict
-# 以下はPhase 6（未実装）
-read_motif_results(file_obj, tool, column_map) -> pd.DataFrame
-normalize_tf_symbols(motif_df, species) -> tuple[pd.DataFrame, UnmatchedReport]
-attach_motif_enrichment(tf_table, motif_df, peak_set) -> pd.DataFrame
+# motif結果の取り込みはPhase 6で別モジュール brim_motif_import.py に実装した（下記14.3b）
+```
+
+### 14.3b `brim_motif_import.py`（Phase 6）
+
+Streamlit・session_state・ネットワーク・外部プロセスを使わない。詳細な決定は`docs/phase6_implementation_plan.md`を参照する。
+
+```python
+build_peak_sets(dar, thresholds, genome_build, species) -> PeakSets      # opening / closing / 背景（検定済みの全peak）
+peak_set_bed_text(peak_sets, which) -> str
+bed_file_name(kind, thresholds) -> str
+build_homer_commands(peak_sets) -> list[str]                             # genome許可リスト（hg38, mm10）だけ。実行はしない
+render_motif_readme(peak_sets, app_version, generated_at) -> str
+build_motif_bundle(peak_sets, app_version, generated_at) -> dict[str, str]
+suggest_column_map(columns) -> dict[str, str]
+motif_file_columns(data) -> list[str]
+read_motif_results(data, file_name, tool, column_map) -> MotifTable      # tool: homer_known / generic。再計算しない
+extract_tf_symbols(motif_name) -> list[str]
+normalize_tf_symbols(motif_rows, reference_symbols) -> tuple[pd.DataFrame, dict]   # 未照合レポート付き
+summarize_motif_by_tf(symbol_map) -> pd.DataFrame
+compare_thresholds(declared, current) -> dict
+import_motif_result(table, peak_sets, peak_set, declaration, reference_symbols, imported_at) -> dict
+import_uploaded_result(state, peak_sets, data, file_name, tool, column_map, peak_set, declaration,
+                       reference_symbols, imported_at) -> dict
+attach_motif_enrichment(tf_table, imports, peak_sets, alpha, source_prepared) -> pd.DataFrame   # 表示用の結合ビュー
+motif_only_tfs(tf_table, imports, peak_sets, alpha) -> pd.DataFrame
+build_motif_summary(source, state, alpha) -> dict                        # manifestの tf_level3（表示用閾値を含む）
+build_motif_export_files(bundle, source, state, tf_runs, alpha) -> dict[str, str]
 ```
 
 ### 14.4 `brim_provenance.py`
@@ -1191,12 +1230,15 @@ Integration/
   rna_atac_gene_summary.csv
   integration_summary.json
   enrichment_by_class.csv
-  tf_candidates.csv               # レベル2以降
-  motif_import_record.json        # レベル3実行時
+  tf_candidates.csv               # レベル2以降。motif_status=not_runのまま（Level 2契約）
+  motif_results.csv               # レベル3で少なくとも1集合をimportした場合: peak集合 × TFの代表行
+  motif_symbol_map.csv             # 同上: motif行→TFの照合（未照合を含む）
+  motif_import_record.json         # 同上: import記録と履歴
+  tf_candidates_with_motif.csv     # 同上: Level 2表への表示用motif結合ビュー
   Analysis_Notebook_Multiomics.md
-MotifAnalysis/                    # レベル3のBED出力を行った場合
-  opened_peaks.bed
-  closed_peaks.bed
+MotifAnalysis/                    # レベル3のBED準備を行い、かつLevel 2・peak集合が現在と一致する場合
+  opened_peaks_padj{p}_lfc{l}.bed # openingが0件なら出力しない
+  closed_peaks_padj{p}_lfc{l}.bed # closingが0件なら出力しない
   all_peaks_background.bed
   motif_analysis_README.txt
 Provenance/
@@ -1204,6 +1246,10 @@ Provenance/
   manifest.md
   reference_manifest.json
 ```
+
+`MotifAnalysis/`はBEDを準備した時点で出力対象になる。`Integration/motif_*`と
+`tf_candidates_with_motif.csv`は、少なくとも1つのmotif結果をimportした場合だけ出力する。古いpeak集合に紐付いた
+Level 3状態はどのファイルにも出力しない。
 
 ### 16.3 外部サービスの明示
 

@@ -7,6 +7,14 @@
 
 ### Added
 
+- Phase 6: Integrationサブタブにレベル3（motif取り込み）を追加。BRIMはmotifをスキャンせず外部ツールを実行しない。
+  opening/closing/背景（検定済みの全peak）のBEDとREADMEの書き出し、genome build（hg38/mm10）に応じたコマンドの表示、
+  HOMER `knownResults.txt`または汎用CSV/TSVの取り込み（ツールが報告した値をそのまま読み、再計算しない）、TFシンボルの
+  照合（大文字小文字を無視、ヘテロダイマーは成分に分割、未照合は一覧）、レベル2の表へのmotif列の結合（支持軸数には
+  算入しない）、閾値の食い違い・別の背景のバッジと警告を実装。peak集合が変わると取り込んだ結果を消去する。Exportに
+  `MotifAnalysis/`、`Integration/motif_*`、`tf_candidates_with_motif.csv`、manifestの`tf_level3`を追加
+  （`tf_candidates.csv`は変更しない）。新規ネットワーク通信・依存関係なし。テストは決定的な合成データで行い、
+  **HOMERの見出しの認識規則は実際の出力では未検証**で、生物学的検証ではない。手順は`docs/motif_analysis_guide.md`。
 - Phase 5: Integrationサブタブにレベル2（TF候補）を追加。同梱CollecTRIの標的濃縮（Fisher正確検定の片側、BH補正は
   選択した遺伝子集合内）、TF発現、TF activityを別々の列で表示し、motif列は「未実行」。背景遺伝子はORAと同一で、定義と
   件数を表示・記録する。`Integration/tf_candidates.csv`・`tf_summary.json`とmanifestの`tf_level2`を出力する。

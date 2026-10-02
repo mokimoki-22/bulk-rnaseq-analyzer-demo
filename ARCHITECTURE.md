@@ -61,7 +61,8 @@ brim-app/
 ├─ brim_tf_networks.py           # TF activity: CollecTRI/DoRothEA（既存）
 ├─ brim_atac.py                  # ATAC入力、検証、DAR推定、annotation
 ├─ brim_multiomics.py            # RNA–ATAC統合、分類、要約
-├─ brim_tf_integration.py        # TF候補推定、motif結果の統合
+├─ brim_tf_integration.py        # TF候補推定（Level 2）
+├─ brim_motif_import.py          # 外部ツールのmotif結果の取り込み（Level 3、Phase 6）
 ├─ brim_provenance.py            # manifest、checksum、環境情報
 ├─ references/
 │  ├─ *.csv                      # 既存の自動走査対象（_EXTERNAL_REFS）
@@ -181,11 +182,30 @@ run_level2(...) -> dict
 combine_tf_tables(runs) -> pd.DataFrame
 get_tf_targets_in_set(tf_symbol, gene_set, network, edges) -> pd.DataFrame
 build_tf_summary(runs, network_info) -> dict
-# Phase 6（未実装）
-read_motif_results(file_obj, tool, column_map) -> pd.DataFrame
-normalize_tf_symbols(motif_df, species) -> tuple[pd.DataFrame, UnmatchedReport]
-attach_motif_enrichment(tf_table, motif_df, peak_set) -> pd.DataFrame
+# motif結果の取り込みは別モジュール brim_motif_import.py（Phase 6、下記3.4b）
 ```
+
+### 3.4b `brim_motif_import.py`（Phase 6）
+
+外部ツールのmotif結果の取り込み専用（BRIMはmotifをスキャンせず、外部ツールを実行せず、ネットワーク通信もしない）。
+Streamlit・session_stateを使わず、閾値・genome build・種は引数で受け取る。
+
+```python
+build_peak_sets(dar, thresholds, genome_build, species) -> PeakSets      # opening / closing / 背景（検定済みの全peak）
+build_homer_commands(peak_sets) -> list[str]                             # genome許可リスト（hg38, mm10）だけ。表示のみ
+build_motif_bundle(peak_sets, app_version, generated_at) -> dict[str, str]   # MotifAnalysis/ のBEDとREADME
+read_motif_results(data, file_name, tool, column_map) -> MotifTable      # HOMER knownResults.txt または汎用CSV/TSV
+normalize_tf_symbols(motif_rows, reference_symbols) -> tuple[pd.DataFrame, dict]   # 未照合レポート付き
+import_motif_result(table, peak_sets, peak_set, declaration, reference_symbols, imported_at) -> dict
+attach_motif_enrichment(tf_table, imports, peak_sets, alpha, source_prepared) -> pd.DataFrame   # 表示用の結合ビュー
+build_motif_summary(source, state, alpha) -> dict                        # manifestの tf_level3（表示用閾値を含む）
+build_motif_export_files(bundle, source, state, tf_runs, alpha) -> dict[str, str]
+```
+
+`brim_tf_integration.py`（`fold_symbol`）に依存し、逆の依存はない。Level 3はLevel 2の現在の結果を要し、Level 2の結果・
+`tf_candidates.csv`・`tf_level2`ブロック・`n_axes_*`は変更しない。UIは`Bulk_RNAseq_Analyzer.py`のIntegrationサブタブに置く。
+アップロード処理は薄いハンドラで、中核は`import_uploaded_result`（単体テスト対象）。無効化: `invalidate_tf_level2_results`が
+motif状態と`tf_level3`をインラインで消去し、`reset_motif_results`は描画時の古さ検出（peak集合のfingerprint不一致）専用。
 
 Phase 5では、標的濃縮はCollecTRIのみ、背景はPhase 4のORA背景と同一、Fisherは片側、BH補正は選択した1つの
 遺伝子集合内に限る。詳細な決定は`docs/phase5_implementation_plan.md`を参照する。

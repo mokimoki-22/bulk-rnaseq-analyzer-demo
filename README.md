@@ -21,7 +21,7 @@ Phase 4では`Multi-omics`内の`Integration`サブタブで、RNAのDEGとATAC�
 gene-summary quadrant（除外理由の内訳つき）、
 evidence table、class別のローカルORAを提供し、結果は共有manifestとExport ZIPへ記録されます。
 出力は「一致（concordant）」「不一致（discordant）」などの記述であり、因果関係を示すものではありません。
-RNAとATACのpadjは結合せず、ORAのpadjは新しい独立した検定です。motif解析（レベル3）は未実装です。
+RNAとATACのpadjは結合せず、ORAのpadjは新しい独立した検定です。
 
 Phase 5では、同じ`Integration`サブタブにレベル2（TF候補）を追加しました。レベル1を実行した後、レベル1の遺伝子集合
 （例: `concordant_activation`、または`concordant_all`・`discordant_all`）を選んで実行します。同梱のCollecTRIだけを使い、
@@ -37,12 +37,26 @@ Phase 5では、同じ`Integration`サブタブにレベル2（TF候補）を追
 （字義どおりの「対応付き・RNA検定済み」の件数も併記します）。画面には背景の定義と件数、限界（核移行や翻訳後修飾で活性化する
 TFは検出されにくいこと、DBの偏り、3つの根拠がいずれもRNA由来で独立ではないこと）を常に表示します。「支持軸数」は
 並べ替えの補助で、統計量ではありません。候補は仮説であり、TFが遺伝子を制御することを示すものではありません。
-motif列は「未実行」と表示されます。Level 1の結果を再実行したときは、ORAとレベル2の結果も消去されます
-（以前は再実行後もORA結果が残っていました）。結果はExportの`Integration/tf_candidates.csv`、`tf_summary.json`と
-manifestの`tf_level2`に記録されます。
+motif列は、レベル3で外部ツールの結果を取り込むまでは「未実行」と表示されます。Level 1の結果を再実行したときは、ORAと
+レベル2の結果（と、レベル3の状態）も消去されます（以前は再実行後もORA結果が残っていました）。結果はExportの
+`Integration/tf_candidates.csv`、`tf_summary.json`とmanifestの`tf_level2`に記録されます。
 
 レベル2のテストは、`tests/tf_support.py`の決定的な合成データ（仕込みTFを含むRNA+ATAC結果と、陰性対照）で行っています。
 これはパイプラインの動作確認であり、生物学的な妥当性を示すものではありません。
+
+Phase 6では、同じサブタブにレベル3（motif）を追加しました。BRIMはmotifのスキャンも外部ツールの実行もしません。レベル2の後に、
+(1) 外部ツールに渡すBED（opening、closing、背景=検定済みの全peak）を書き出し、(2) BRIMの外で実行するコマンドを表示し
+（genome buildがhg38またはmm10のとき）、(3) 得られた結果（HOMERの`knownResults.txt`、または列を選ぶCSV/TSV）を取り込みます。
+取り込んだ結果は、レベル2の表に`motif_opening_*`・`motif_closing_*`の別の列として並びます。openingとclosingは別々に扱い、
+レベル2の遺伝子集合とは自動では対応付けません。支持軸数にはmotifを数えず、motifのpadjはBRIMで補正・再計算・結合しません。
+結果に無いTFは「結果に無い」であり、「濃縮なし」ではありません。閾値の食い違いや、BRIMの背景でない背景を使った結果には
+バッジと警告が付きます。peak集合が変わる（ATACの結果・閾値・genome build・種の変更など）と、取り込んだ結果は消去されます。
+結果はExportの`MotifAnalysis/`、`Integration/motif_*`、`tf_candidates_with_motif.csv`とmanifestの`tf_level3`に記録されます
+（`tf_candidates.csv`は設計上`motif_status=not_run`のままです）。手順と限界は`docs/motif_analysis_guide.md`を参照してください。
+
+レベル3のテストは、決定的な合成データ（DARの境界値、HOMER風の合成表）で行っています。**HOMERの`knownResults.txt`の見出しの
+認識規則は、実際のツール出力では未検証**です（認識できない場合は分かりやすいエラーで止まります）。実データでの生物学的な検証では
+なく、生物学的な妥当性を示すものではありません。
 
 ORAの背景遺伝子は、RNAのpadjとlog2FCがともに検定済み（NAでない）で、検定済みATAC peakが
 1つ以上対応付いた遺伝子です。有意でない遺伝子も含みます（全遺伝子でも、有意な遺伝子のみでもありません）。

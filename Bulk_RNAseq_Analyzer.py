@@ -1175,12 +1175,27 @@ def collect_all_results():
         # is built from those results alone, never from a stale copy kept beside the Level 1 provenance.
         exported_provenance = {key: value for key, value in (integration_provenance or {}).items()
                                if key != "tf_level2"}
+        exported_provenance.pop("tf_level3", None)          # rebuilt below from the current state only
         tf_runs, _tf_stale = _current_tf_level2_runs(integration_genes)
         if tf_runs:
             tf_block = brim_tf_integration.build_tf_summary(tf_runs, next(iter(tf_runs.values()))["network_info"])
             files["Integration/tf_candidates.csv"] = brim_tf_integration.combine_tf_tables(tf_runs).to_csv(index=False)
             files["Integration/tf_summary.json"] = json.dumps(tf_block, indent=2, ensure_ascii=False, allow_nan=False)
             exported_provenance["tf_level2"] = tf_block
+            # Level 3 needs a current Level 2 result and peak sets that still match (I-6.2); like Level 2 it is rebuilt
+            # from the current state only, never from the stored provenance copy.
+            motif_source, motif_state, _motif_reason = _current_motif_state(integration_genes)
+            if motif_source is not None:
+                integration_settings = st.session_state["integration_settings"]
+                motif_peak_sets = brim_motif_import.build_peak_sets(
+                    st.session_state["atac_results"], integration_settings["thresholds"],
+                    integration_settings["genome_build"], integration_settings["species"])
+                motif_bundle = brim_motif_import.build_motif_bundle(
+                    motif_peak_sets, motif_source["app_version"], motif_source["generated_at"])
+                files.update(brim_motif_import.build_motif_export_files(
+                    motif_bundle, motif_source, motif_state, tf_runs, float(st.session_state.get("tf_level3_alpha", 0.05))))
+                exported_provenance["tf_level3"] = brim_motif_import.build_motif_summary(
+                    motif_source, motif_state, float(st.session_state.get("tf_level3_alpha", 0.05)))
         files["Integration/integration_edges.csv"] = integration_edges.to_csv(index=False)
         files["Integration/gene_summary.csv"] = integration_genes.to_csv(index=False)
         files["Integration/summary.json"] = json.dumps(
@@ -2341,7 +2356,8 @@ def _store_tf_level3_provenance():
         provenance.pop("tf_level3", None)
     else:
         provenance["tf_level3"] = brim_motif_import.build_motif_summary(
-            source, st.session_state.get("integration_motif_results"))
+            source, st.session_state.get("integration_motif_results"),
+            float(st.session_state.get("tf_level3_alpha", 0.05)))
     st.session_state["integration_provenance"] = provenance
 
 
@@ -2496,10 +2512,10 @@ def _render_tf_level3_ui(genes, lang):
     else:
         reason_info = brim_motif_import.homer_unavailable_reason(peak_sets)
         st.info(ui(reason_info["message"], lang, reason_info["message_ja"]))
-    st.caption(ui("Steps: 1) prepare the external tool by its own documentation (HOMER usually needs WSL on Windows); "
+    st.caption(ui("Steps: 1) prepare the external tool by its official documentation and verify supported operating systems; "
                   "2) put the BED files in one folder; 3) run the commands; 4) import knownResults.txt below, choosing "
                   "opening or closing.", lang,
-                  "手順: 1) 外部ツールをそのツールの文書に従って用意（HOMERはWindowsでは通常WSLが必要）; 2) BEDファイルを"
+                  "手順: 1) 外部ツールをそのツールの公式文書に従って用意し、対応OSを確認; 2) BEDファイルを"
                   "1つのフォルダに置く; 3) コマンドを実行; 4) 下でknownResults.txtを、openingまたはclosingを選んで取り込む。"))
     _render_motif_import_form(peak_sets, settings, lang)
     imports = (st.session_state.get("integration_motif_results") or {}).get("imports", {})
