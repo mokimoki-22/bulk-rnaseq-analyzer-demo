@@ -8,6 +8,21 @@ Phase 1のStreamlit非依存ATAC coreを試すための人工データです。�
 - `BRIM_ATAC_metadata.csv`: Control 3 samples、Treated 3 samplesの対応表です。
 - `BRIM_ATAC_DAR.csv`: 解析済みDAR tableモードのschema確認用です。padj NA行を1行含みます。
 
+## Bulk RNAサンプルと対応するマルチオミクス用データ
+
+Bulk RNAサンプルの12サンプル・3群（`Control`、`Treatment_A`、`Treatment_B`）と
+同じサンプル名を使う人工ATACデータです。Bulk RNAとATACを同じ条件で読み込み、
+マルチオミクス機能を試すために使用できます。
+
+- `BRIM_ATAC_bulk_matched_peak_counts.csv`: 60 peaks × 12 samplesのcount matrix。
+  先頭20 peaksはTreatment_Aで開き、次の20 peaksはTreatment_Bで開き、次の10 peaksは
+  Treatment_Aで閉じるように固定seedで生成しています。残り10 peaksは概ね不変です。
+- `BRIM_ATAC_bulk_matched_metadata.csv`: Bulk RNAサンプルと同じ12サンプル名・3群の対応表です。
+- `BRIM_ATAC_bulk_matched_peak_gene_mapping.csv`: 60 peaksをBulk RNAサンプルで使うMouse gene symbolへ
+  対応付けるユーザー指定mappingです。ATAC解析後に読み込み、peak–gene edge作成に使えます。
+
+これらは実研究データではなく、RNA–ATACの操作確認用に作成した人工データです。
+
 これらはBRIMのテスト用に新規生成したデータで、リポジトリのMIT Licenseの対象です。
 
 ## Phase 5 のTF候補テスト用の合成データ

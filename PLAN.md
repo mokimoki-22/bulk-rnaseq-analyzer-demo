@@ -109,6 +109,20 @@
   PyDESeq2 API不一致（`DeseqDataSet`が`design=`を受けない）で、今回の変更に触れないRNA/DAR実エンジン経路で発生した。
   motif関連83件は全件成功。監査役A・Bはcommit/CI前の再監査でGO。Phase 6の完了判定はpush後のCI・実アップロード経路の
   手動確認・A/Bの最終監査まで保留する。
+  **追記（2026-10-02、Step 8）:** commit `0202941` のGitHub Actions run `36952839385` は、
+  Ubuntu/Windows × Python 3.11/3.12 の4環境すべて成功した（Windows 3.12を含む）。ローカルでは
+  `tests/test_motif_import.py` と `tests/test_motif_import_ui.py` の83件が成功した。既存の要件だけを
+  `.venv` に導入した通常のStreamlit実行環境で、トップページと `/_stcore/health` はいずれも200を返した。
+  一方、実行環境が公開する埋め込みブラウザはローカルサーバーから隔離され、PC上のEdgeも自動操作対象として
+  公開されないため、実際のファイルアップロード経路の手動確認は未実施である。これはCI/AppTestとは別の
+  必須確認として残す。
+  **追記（2026-10-02、サンプルデータのDEG停止修正）:** 同梱RNAサンプルに重複した遺伝子シンボル
+  （`Flg`、`Ocln`）があり、サンプル読込だけが既存の重複行合算処理を通らなかったため、DEG実行時に
+  `cannot reindex on an axis with duplicate labels` が発生した。サンプル読込にも同じ合算処理を適用し、
+  合算件数を画面とRNA provenanceに記録するよう修正した。重複行を削除せず、同一シンボルのcountを合算する。
+  実サンプル読込後のAnalyze操作を含む回帰テストを追加し、関連テスト17件が成功した。
+  Bulk RNAの12サンプル・3群に対応する人工ATAC count/metadata/peak-gene mappingも追加し、
+  ATAC関連46件のテストが成功した。新規データは操作確認用で、生物学的妥当性を示さない。
   Windows/3.12ジョブの再実行にはGitHubへのサインインが必要で、私はできない。新しいpushごとのrunを標本として記録する。
 - **Do not start:** Phase 7（検証と公開）。計画書§1で範囲外としたもの（複数ツールの併存、TF別名・family辞書、motifの
   `n_axes_supported`への算入、de novo結果の取込み、HOMER以外の専用パーサ、サンプルのmotif結果ファイル）。不変条件I-1〜I-6の

@@ -64,6 +64,76 @@ def test_run_deg_returns_standard_results_dataframe() -> None:
     assert result["padj"].is_monotonic_increasing
 
 
+def test_qc_pca_preserves_duplicate_gene_rows() -> None:
+    """QC PCA accepts the duplicate gene symbols present in the demo data."""
+    app = importlib.import_module("Bulk_RNAseq_Analyzer")
+    counts, _ = app.generate_sample_data()
+
+    assert counts.index.duplicated().any()
+    log_cpm = np.log1p(counts.div(counts.sum(axis=0), axis=1) * 1e6)
+    pca, coordinates = app.fit_qc_pca(log_cpm)
+
+    assert coordinates.shape == (counts.shape[1], 2)
+    assert pca.n_features_in_ == counts.shape[0]
+
+
+def test_sample_data_qc_pca_renders_with_duplicate_gene_symbols() -> None:
+    """The real demo matrix reaches its QC/PCA view without a duplicate-name error."""
+    module = importlib.import_module("Bulk_RNAseq_Analyzer")
+    counts, metadata = module.generate_sample_data()
+    app = AppTest.from_file(str(APP_PATH), default_timeout=60)
+    state = {
+        "upload_mode": "single",
+        "counts_df": counts,
+        "qc_filtered_df": counts.copy(),
+        "metadata": metadata,
+        "conditions": metadata["condition"].unique().tolist(),
+        "sp": module.SPECIES_MAP["Mouse (mmu)"],
+        "is_sample_data": True,
+        "lang_display": "English",
+        "language_selector": "English",
+        "norm_method": "log1p",
+    }
+    for key, value in state.items():
+        app.session_state[key] = value
+
+    app.run(timeout=60)
+
+    assert not app.exception
+
+
+def test_sample_data_load_prepares_counts_for_deg() -> None:
+    """The demo load follows the upload path's duplicate-gene aggregation."""
+    module = importlib.import_module("Bulk_RNAseq_Analyzer")
+    raw_counts, _ = module.generate_sample_data()
+    assert raw_counts.index.duplicated().any()
+
+    app = AppTest.from_file(str(APP_PATH), default_timeout=60)
+    app.session_state["upload_mode"] = "single"
+    app.run(timeout=60)
+    sample_button = next(
+        button for button in app.button
+        if "Sample Data" in button.label or "サンプルデータ" in button.label
+    )
+    sample_button.click().run(timeout=60)
+
+    assert not app.exception
+    counts = app.session_state["counts_df"]
+    assert counts.index.is_unique
+    pd.testing.assert_frame_equal(counts, raw_counts.groupby(level=0, sort=False).sum())
+    assert app.session_state["sample_duplicate_gene_rows_merged"] == int(
+        raw_counts.index.duplicated().sum()
+    )
+    for sample in counts.columns[6:]:
+        app.selectbox(key=f"gs_{sample}").set_value("G2")
+    app.run(timeout=60)
+    analyze = next(button for button in app.button if button.label == "Analyze")
+    analyze.click().run(timeout=60)
+    assert not app.exception
+    assert app.session_state["deg_results"] is not None
+    assert app.session_state["deg_results"].index.is_unique
+
+
 def test_app_starts_and_renders_existing_primary_tabs() -> None:
     """The Streamlit app starts and renders every primary v1.1.0 tab."""
     app = AppTest.from_file(str(APP_PATH), default_timeout=60)

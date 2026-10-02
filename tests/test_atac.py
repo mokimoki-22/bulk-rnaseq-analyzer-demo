@@ -515,6 +515,33 @@ def test_sample_peak_count_matrix_runs_through_real_dar_engine():
     assert ordered.iloc[30:60]["log2FoldChange"].median() < -0.5
 
 
+def test_bulk_matched_atac_sample_files_align_with_rna_sample_contract():
+    counts = brim_atac.read_peak_count_matrix(
+        ROOT / "sample_data" / "BRIM_ATAC_bulk_matched_peak_counts.csv",
+        ",", "index", "0-based",
+    )
+    metadata = pd.read_csv(
+        ROOT / "sample_data" / "BRIM_ATAC_bulk_matched_metadata.csv", index_col="sample"
+    )
+    mapping = brim_atac.read_peak_gene_mapping(
+        ROOT / "sample_data" / "BRIM_ATAC_bulk_matched_peak_gene_mapping.csv",
+        ",", counts,
+    )
+
+    sample_columns = [
+        column for column in counts.columns
+        if column not in {"peak_id", "chrom", "start", "end"}
+    ]
+    assert counts.shape == (60, 16)
+    assert sample_columns == list(metadata.index)
+    assert metadata["condition"].value_counts().to_dict() == {
+        "Control": 4, "Treatment_A": 4, "Treatment_B": 4,
+    }
+    assert len(mapping) == len(counts)
+    assert mapping["peak_id"].is_unique
+    assert mapping["gene_id"].nunique() == len(counts)
+
+
 def test_bed_export_excludes_not_tested_peaks_and_uses_explicit_thresholds():
     dar = pd.DataFrame({
         "peak_id": ["open", "closed", "na"], "chrom": ["chr1"] * 3,

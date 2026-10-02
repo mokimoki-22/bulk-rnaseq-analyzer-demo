@@ -7,6 +7,8 @@
 
 ### Added
 
+- Bulk RNAサンプルと同じ12サンプル・3群を使う人工ATAC peak counts、metadata、
+  peak-gene mappingを追加し、RNA–ATACマルチオミクス機能を試せるようにした。
 - Phase 6: Integrationサブタブにレベル3（motif取り込み）を追加。BRIMはmotifをスキャンせず外部ツールを実行しない。
   opening/closing/背景（検定済みの全peak）のBEDとREADMEの書き出し、genome build（hg38/mm10）に応じたコマンドの表示、
   HOMER `knownResults.txt`または汎用CSV/TSVの取り込み（ツールが報告した値をそのまま読み、再計算しない）、TFシンボルの
@@ -51,6 +53,8 @@
 
 ### Changed
 
+- 同梱RNAサンプルのQC PCAで重複遺伝子名を許容し、サンプル読込では既存のcount合算規則を適用して
+  DEGの重複ラベルエラーを解消。合算件数は画面とprovenanceへ記録する。
 - Phase 4のIntegrationでLevel 1を再実行すると、ORA・レベル2・motifの保存結果も消去される（以前は再実行後もORA結果が
   残り、ORA履歴だけが空になっていた不整合の修正）。ORAの計算・export名は変更していない。
 - Fixed the pinned GENCODE generation-script checksum check on Windows.  The

@@ -1014,6 +1014,18 @@ def plot_pca_plotly(pca_df, explained_var, cond_colors, template='plotly_white',
     fig.update_layout(font=dict(family=font, size=font_size))
     return fig
 
+
+def fit_qc_pca(log_cpm_by_gene: pd.DataFrame) -> tuple[PCA, np.ndarray]:
+    """Fit the two-component QC PCA without treating gene labels as feature names.
+
+    Count matrices may legitimately contain repeated gene symbols.  Those rows
+    remain separate PCA features; converting to a NumPy array only prevents
+    scikit-learn from rejecting duplicate DataFrame column labels after the
+    sample-by-gene transpose.
+    """
+    pca = PCA(n_components=2)
+    return pca, pca.fit_transform(log_cpm_by_gene.T.to_numpy())
+
 def plot_corr_heatmap_plotly(df, template='plotly_white', font="sans-serif", font_size=12):
     corr = df.corr()
     fig = px.imshow(corr, text_auto=True, aspect="auto", color_continuous_scale='RdBu_r', 
@@ -1101,6 +1113,11 @@ def collect_all_results():
         inputs["rna"] = {"source_mode": "count_matrix", "count_matrix": matrix,
                          "source_files": st.session_state["rna_input_files"],
                          "is_sample_data": st.session_state.get("is_sample_data", False)}
+        if st.session_state.get("is_sample_data") and st.session_state.get("upload_mode") == "single":
+            inputs["rna"]["sample_data_preprocessing"] = {
+                "duplicate_gene_rows_merged": st.session_state.get("sample_duplicate_gene_rows_merged", 0),
+                "duplicate_gene_aggregation": "sum by gene symbol",
+            }
         settings["rna"] = {
             "lfc_threshold": st.session_state.get("lfc_t", 1.0),
             "padj_threshold": st.session_state.get("padj_t", 0.05),
@@ -1562,6 +1579,14 @@ if st.session_state.get("upload_mode") is not None:
         else:
             msg = ui('🧪 **Using Sample Data (Mouse, 12 samples, 3 groups) — Demo only**\n\nThis dataset is for demonstration purposes only. Expression patterns are artificially constructed and do not represent real experimental data or biological dispersion.', lang, '🧪 **サンプルデータを使用中 (Mouse, 12 samples, 3 groups)**\n\nこのデータは機能デモ専用です。遺伝子発現パターンは人工的に設定されており、実際の実験データを代表するものではありません。')
         st.warning(msg)
+        _sample_duplicate_rows = st.session_state.get("sample_duplicate_gene_rows_merged", 0)
+        if st.session_state.get("upload_mode") == "single" and _sample_duplicate_rows:
+            st.caption(ui(
+                "Sample data: {count} repeated gene-symbol rows were summed before analysis.",
+                lang,
+                "サンプルデータ: 重複した遺伝子名の行 {count} 件を解析前に合算しました。",
+                count=_sample_duplicate_rows,
+            ))
 
 def _atac_separator(label):
     return "\t" if label == "TSV" else ","
@@ -2942,6 +2967,8 @@ with tab_upload:
             if st.button(btn_text, width="stretch"):
                 with st.status(ui("🎩 Loading...", lang)) as status:
                     cdf, meta = generate_sample_data()
+                    duplicate_rows_merged = int(cdf.index.duplicated().sum())
+                    cdf = prepare_count_matrix(cdf)
                     reset_data_results()
                     st.session_state["rna_input_files"] = []
                     st.session_state["rna_id_mapping"] = []
@@ -2952,9 +2979,12 @@ with tab_upload:
                     st.session_state["conditions"] = ["Control", "Treatment_A", "Treatment_B"]
                     st.session_state["sp"] = SPECIES_MAP["Mouse (mmu)"]
                     st.session_state["is_sample_data"] = True
+                    st.session_state["sample_duplicate_gene_rows_merged"] = duplicate_rows_merged
                     # Show validation for sample data too
                     st.session_state["last_validation_df"] = cdf
-                    status.update(label=ui("✅ Sample data loaded (500 genes, 3 groups)", lang), state="complete", expanded=False)
+                    status.update(label=ui("✅ Sample data loaded ({genes} genes, 3 groups)", lang,
+                                           "✅ サンプルデータを読み込みました（{genes}遺伝子、3群）",
+                                           genes=len(cdf)), state="complete", expanded=False)
                 st.rerun()
 
             st.divider()
@@ -3005,6 +3035,7 @@ with tab_upload:
                             st.session_state["sp"] = _selected_species
                             st.session_state["metadata"] = None
                             st.session_state["is_sample_data"] = False
+                            st.session_state["sample_duplicate_gene_rows_merged"] = 0
                             st.session_state["last_validation_df"] = counts_df
                             status.update(label="✅ Ready!", state="complete", expanded=False)
                             st.rerun()
@@ -3268,8 +3299,7 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                     if min(log_qc_hvg.shape) < 2:
                         st.info(ui("PCA requires at least 2 samples and 2 genes. The PCA plot was skipped.", lang))
                     else:
-                        pca_qc = PCA(n_components=2)
-                        coords_qc = pca_qc.fit_transform(log_qc_hvg.T)
+                        pca_qc, coords_qc = fit_qc_pca(log_qc_hvg)
                         pca_df_qc = pd.DataFrame(coords_qc, columns=["PC1", "PC2"], index=qc_df.columns)
                         pca_df_qc["condition"] = st.session_state["metadata"]["condition"]
                         fig_pca_qc = px.scatter(pca_df_qc, x="PC1", y="PC2", color="condition",
@@ -3331,6 +3361,7 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                 st.session_state["sp"]                  = SPECIES_MAP["Mouse (mmu)"]
                 st.session_state["upload_mode"]        = "multi"
                 st.session_state["is_sample_data"]     = True
+                st.session_state["sample_duplicate_gene_rows_merged"] = 0
                 st.session_state["last_validation_df"] = _mc
                 _msts.update(label=ui("✅ 3 studies loaded (Atopic / Psoriasis / AEW)", lang), state="complete", expanded=False)
             st.rerun()
@@ -3538,6 +3569,7 @@ These variables enable **Interaction Analysis** in the DEG tab — e.g., detecti
                     st.session_state["sp"]               = _study_configs[0]["sp"]
                     st.session_state["upload_mode"]      = "multi"
                     st.session_state["is_sample_data"]   = False
+                    st.session_state["sample_duplicate_gene_rows_merged"] = 0
                     st.session_state["last_validation_df"] = _merged_counts
 
                     _sts.update(label=f"✅ {len(_loaded_names)} studies loaded!", state="complete", expanded=False)
